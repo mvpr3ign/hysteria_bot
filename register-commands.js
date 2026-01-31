@@ -53,6 +53,12 @@ const createCommands = () => {
       .setDescription("Create or update an event type")
       .addStringOption((option) =>
         option
+          .setName("password")
+          .setDescription("Approval password")
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
           .setName("event")
           .setDescription("Event type name")
           .setRequired(true)

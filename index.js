@@ -509,6 +509,16 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
+      const passwordInput = interaction.options.getString("password", true);
+      const approvalPassword = "#hysteriaPointsApproved@100";
+      if (passwordInput !== approvalPassword) {
+        await interaction.reply({
+          content: "Invalid password.",
+          ephemeral: true
+        });
+        return;
+      }
+
       const eventInput = interaction.options.getString("event", true);
       const normalizedEvent = normalizeEventName(eventInput);
       const points = interaction.options.getInteger("points", true);
