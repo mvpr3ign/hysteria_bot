@@ -537,6 +537,7 @@ client.on("interactionCreate", async (interaction) => {
         .map(([userId, data]) => ({
           userId,
           ign: data?.profile?.ign || data?.profile?.name || data?.profile?.tag || userId,
+          nickname: data?.profile?.nickname || data?.profile?.name || data?.profile?.tag || userId,
           points: data?.totalPoints || 0
         }))
         .sort((a, b) => b.points - a.points)
@@ -544,7 +545,7 @@ client.on("interactionCreate", async (interaction) => {
 
       const lines = entries.map(
         (entry, index) =>
-          `${index + 1} - ${entry.ign} (${entry.userId}) - ${entry.points}`
+          `${index + 1}. ${entry.nickname} - ${entry.ign} - Points: ${entry.points}`
       );
 
       await interaction.reply({
