@@ -143,11 +143,23 @@ const closeCta = async (channelId, cta) => {
         const disabledRow = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId("cta:closed")
-            .setLabel("Enter Code")
+            .setLabel("Registration Closed")
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(true)
         );
-        await message.edit({ components: [disabledRow] });
+        const createdDate = formatDate(new Date(cta.createdAt));
+        const durationMinutes = Math.max(
+          1,
+          Math.round((cta.expiresAt - cta.createdAt) / (60 * 1000))
+        );
+        const closedContent =
+          "NEW EVENT ACTIVE\n" +
+          `EVENT TYPE: ${cta.eventType}\n` +
+          `DATE: ${createdDate}\n` +
+          `POINTS: ${cta.points}\n` +
+          `DURATION: ${durationMinutes} minutes\n` +
+          "COUNTDOWN: DONE";
+        await message.edit({ content: closedContent, components: [disabledRow] });
       }
     }
 
