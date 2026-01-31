@@ -111,6 +111,27 @@ const createCommands = () => {
           .setRequired(true)
       ),
     new SlashCommandBuilder()
+      .setName("update_profile")
+      .setDescription("Update your IGN or class")
+      .addStringOption((option) =>
+        option
+          .setName("ign")
+          .setDescription("In-game name")
+          .setRequired(false)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("class")
+          .setDescription("Class")
+          .addChoices(
+            { name: "MELEE", value: "MELEE" },
+            { name: "MAGE", value: "MAGE" },
+            { name: "RANGER", value: "RANGER" },
+            { name: "SPEC", value: "SPEC" }
+          )
+          .setRequired(false)
+      ),
+    new SlashCommandBuilder()
       .setName("profile")
       .setDescription("Show your registered profile"),
     new SlashCommandBuilder()
@@ -178,6 +199,12 @@ const createCommands = () => {
     new SlashCommandBuilder()
       .setName("reset_points")
       .setDescription("Reset points (Senate only)")
+      .addStringOption((option) =>
+        option
+          .setName("password")
+          .setDescription("Approval password")
+          .setRequired(true)
+      )
       .addStringOption((option) =>
         option
           .setName("scope")

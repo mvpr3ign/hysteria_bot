@@ -622,6 +622,51 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
+    if (interaction.commandName === "update_profile") {
+      const ignInput = interaction.options.getString("ign");
+      const classInput = interaction.options.getString("class");
+      const nextIgn = ignInput ? ignInput.trim() : "";
+      const nextClass = classInput ? classInput.trim().toUpperCase() : "";
+
+      if (!nextIgn && !nextClass) {
+        await interaction.reply({
+          content: "Provide at least one field to update (ign or class).",
+          ephemeral: true
+        });
+        return;
+      }
+
+      updateStore((next) => {
+        if (!next.attendance[interaction.user.id]) {
+          next.attendance[interaction.user.id] = {
+            totalPoints: 0,
+            history: [],
+            profile: {}
+          };
+        }
+
+        const record = next.attendance[interaction.user.id];
+        record.profile = {
+          ...record.profile,
+          discordId: interaction.user.id,
+          nickname: interaction.member?.nickname || record.profile?.nickname || interaction.user.username,
+          name: interaction.user.username,
+          tag: interaction.user.tag,
+          ign: nextIgn || record.profile?.ign,
+          class: nextClass || record.profile?.class
+        };
+
+        return next;
+      });
+
+      await interaction.reply({
+        content: "Profile updated.",
+        ephemeral: true
+      });
+      logActivity(interaction, "update_profile", `IGN=${nextIgn || "unchanged"}, Class=${nextClass || "unchanged"}`);
+      return;
+    }
+
     if (interaction.commandName === "cta_attendance") {
       if (!ensureSenate(interaction)) {
         await interaction.reply({
@@ -962,6 +1007,16 @@ client.on("interactionCreate", async (interaction) => {
       if (!ensureSenate(interaction)) {
         await interaction.reply({
           content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const passwordInput = interaction.options.getString("password", true);
+      const approvalPassword = "#hysteriaPointsApproved@100";
+      if (passwordInput !== approvalPassword) {
+        await interaction.reply({
+          content: "Invalid password.",
           ephemeral: true
         });
         return;
