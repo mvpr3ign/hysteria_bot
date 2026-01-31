@@ -737,6 +737,16 @@ client.on("interactionCreate", async (interaction) => {
 
       const nicknameInput = interaction.options.getString("nickname", true);
       const pointsInput = interaction.options.getInteger("points", true);
+      const passwordInput = interaction.options.getString("password", true);
+      const approvalPassword = "#hysteriaPointsApproved@100";
+
+      if (passwordInput !== approvalPassword) {
+        await interaction.reply({
+          content: "Invalid password.",
+          ephemeral: true
+        });
+        return;
+      }
 
       if (!pointsInput || pointsInput <= 0) {
         await interaction.reply({
@@ -812,6 +822,16 @@ client.on("interactionCreate", async (interaction) => {
       if (!ensureSenate(interaction)) {
         await interaction.reply({
           content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const passwordInput = interaction.options.getString("password", true);
+      const approvalPassword = "#hysteriaPointsApproved@100";
+      if (passwordInput !== approvalPassword) {
+        await interaction.reply({
+          content: "Invalid password.",
           ephemeral: true
         });
         return;

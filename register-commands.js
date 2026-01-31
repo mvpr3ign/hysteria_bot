@@ -153,6 +153,12 @@ const createCommands = () => {
           .setName("points")
           .setDescription("Points to add")
           .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("password")
+          .setDescription("Approval password")
+          .setRequired(true)
       ),
     new SlashCommandBuilder()
       .setName("addpoints_batch")
@@ -161,6 +167,12 @@ const createCommands = () => {
         option
           .setName("file")
           .setDescription("TXT file with lines: IGN,points")
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("password")
+          .setDescription("Approval password")
           .setRequired(true)
       ),
     new SlashCommandBuilder()
