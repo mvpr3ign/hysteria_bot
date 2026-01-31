@@ -239,13 +239,14 @@ const buildPointsList = (attendance, limit = 200) => {
     .map(([userId, data]) => ({
       userId,
       ign: data?.profile?.ign || data?.profile?.name || data?.profile?.tag || userId,
+      nickname: data?.profile?.nickname || data?.profile?.name || data?.profile?.tag || userId,
       points: data?.totalPoints || 0
     }))
     .sort((a, b) => b.points - a.points);
 
   const lines = [];
   for (const [index, entry] of entries.entries()) {
-    lines.push(`${index + 1} - ${entry.ign} (${entry.userId}) - ${entry.points}`);
+    lines.push(`${index + 1}. ${entry.nickname} - ${entry.ign} - Points: ${entry.points}`);
     if (lines.length >= limit) break;
   }
 
