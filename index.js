@@ -41,6 +41,11 @@ const formatTimestamp = (date) => {
   }).format(date);
 };
 
+const normalizeIgn = (value) => {
+  if (!value) return "";
+  return value.trim().toUpperCase();
+};
+
 const generateCode = (length = 4) => {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const alphaNumeric = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -127,6 +132,11 @@ const appendAuditLog = (action, interaction, details) => {
   });
 };
 
+const logSenateAction = (interaction, action, details) => {
+  if (!ensureSenate(interaction)) return;
+  appendAuditLog(action, interaction, details);
+};
+
 const getRankForUser = (attendance, userId) => {
   const sorted = Object.entries(attendance).sort(
     (a, b) => (b[1]?.totalPoints || 0) - (a[1]?.totalPoints || 0)
@@ -139,18 +149,26 @@ const buildPointsList = (attendance, limit = 200) => {
   const entries = Object.entries(attendance)
     .map(([userId, data]) => ({
       userId,
-      name: data?.profile?.name || data?.profile?.tag || userId,
+      ign: data?.profile?.ign || data?.profile?.name || data?.profile?.tag || userId,
       points: data?.totalPoints || 0
     }))
     .sort((a, b) => b.points - a.points);
 
   const lines = [];
-  for (const entry of entries) {
-    lines.push(`${entry.name} - ${entry.points}`);
+  for (const [index, entry] of entries.entries()) {
+    lines.push(`${index + 1} - ${entry.ign} (${entry.userId}) - ${entry.points}`);
     if (lines.length >= limit) break;
   }
 
   return { lines, total: entries.length };
+};
+
+const findUsersByIgn = (attendance, ignInput) => {
+  const normalizedIgn = normalizeIgn(ignInput);
+  if (!normalizedIgn) return [];
+  return Object.entries(attendance)
+    .filter(([, data]) => normalizeIgn(data?.profile?.ign) === normalizedIgn)
+    .map(([userId, data]) => ({ userId, data }));
 };
 
 client.once("ready", () => {
@@ -225,6 +243,12 @@ client.on("interactionCreate", async (interaction) => {
         return next;
       });
 
+      logSenateAction(
+        interaction,
+        "cta_created",
+        `Event=${normalizedEvent}, Points=${points}, Duration=${duration}m, Channel=${channelId}`
+      );
+
       scheduleCtaClose(channelId, expiresAt);
       return;
     }
@@ -233,6 +257,8 @@ client.on("interactionCreate", async (interaction) => {
       const lines = Object.entries(store.eventPoints)
         .map(([name, value]) => `${name} = ${value} pts`)
         .join("\n");
+
+      logSenateAction(interaction, "list_events", "Listed event points");
 
       await interaction.reply({
         content: lines.length ? lines : "No events set.",
@@ -259,6 +285,12 @@ client.on("interactionCreate", async (interaction) => {
         return next;
       });
 
+      appendAuditLog(
+        "set_event",
+        interaction,
+        `Event=${normalizedEvent}, Points=${points}`
+      );
+
       await interaction.reply({
         content: `${normalizedEvent} event has been assigned ${points} points!`,
         ephemeral: true
@@ -268,7 +300,7 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.commandName === "points") {
       const scope = interaction.options.getString("scope");
-      const targetUser = interaction.options.getUser("user");
+      const ignInput = interaction.options.getString("ign");
 
       if (scope === "all") {
         const { lines, total } = buildPointsList(store.attendance);
@@ -278,26 +310,67 @@ client.on("interactionCreate", async (interaction) => {
           content: content + suffix,
           ephemeral: true
         });
+        logSenateAction(interaction, "points_all", "Viewed all points");
         return;
       }
 
-      const userId = targetUser?.id || interaction.user.id;
-      const record = store.attendance[userId];
-      const points = record?.totalPoints || 0;
-      const rank = getRankForUser(store.attendance, userId);
+      if (ignInput) {
+        const matches = findUsersByIgn(store.attendance, ignInput);
 
-      if (userId === interaction.user.id) {
+        if (!matches.length) {
+          await interaction.reply({
+            content: `No user found with IGN "${ignInput}".`,
+            ephemeral: true
+          });
+        logSenateAction(
+          interaction,
+          "points_ign_not_found",
+          `IGN=${ignInput}`
+        );
+          return;
+        }
+
+        if (matches.length > 1) {
+          const names = matches
+            .map(({ data, userId }) => data?.profile?.tag || data?.profile?.name || userId)
+            .join(", ");
+          await interaction.reply({
+            content: `Multiple users found with IGN "${ignInput}": ${names}.`,
+            ephemeral: true
+          });
+        logSenateAction(
+          interaction,
+          "points_ign_ambiguous",
+          `IGN=${ignInput}, Matches=${names}`
+        );
+          return;
+        }
+
+        const { userId, data } = matches[0];
+        const points = data?.totalPoints || 0;
+        const rank = getRankForUser(store.attendance, userId);
+        const label = data?.profile?.ign || data?.profile?.name || data?.profile?.tag || userId;
+
         await interaction.reply({
-          content: `Your current points = ${points}\nYour current rank = ${rank || "N/A"}`,
+          content: `${rank || "N/A"} - ${label} (${userId}) - ${points}`,
           ephemeral: true
         });
+        logSenateAction(
+          interaction,
+          "points_ign",
+          `IGN=${label}, Points=${points}, Rank=${rank || "N/A"}`
+        );
         return;
       }
 
+      const { lines, total } = buildPointsList(store.attendance);
+      const content = lines.length ? lines.join("\n") : "No points recorded yet.";
+      const suffix = total > lines.length ? `\n...and ${total - lines.length} more.` : "";
       await interaction.reply({
-        content: `Points for ${targetUser?.tag || userId} = ${points}\nRank = ${rank || "N/A"}`,
+        content: content + suffix,
         ephemeral: true
       });
+      logSenateAction(interaction, "points_all_default", "Viewed all points");
       return;
     }
 
@@ -305,15 +378,18 @@ client.on("interactionCreate", async (interaction) => {
       const entries = Object.entries(store.attendance)
         .map(([userId, data]) => ({
           userId,
-          name: data?.profile?.name || data?.profile?.tag || userId,
+          ign: data?.profile?.ign || data?.profile?.name || data?.profile?.tag || userId,
           points: data?.totalPoints || 0
         }))
         .sort((a, b) => b.points - a.points)
         .slice(0, 20);
 
       const lines = entries.map(
-        (entry, index) => `${index + 1}. ${entry.name} - ${entry.points}`
+        (entry, index) =>
+          `${index + 1} - ${entry.ign} (${entry.userId}) - ${entry.points}`
       );
+
+      logSenateAction(interaction, "leaderboard", "Viewed leaderboard");
 
       await interaction.reply({
         content: lines.length ? lines.join("\n") : "No points recorded yet.",
@@ -324,7 +400,8 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.commandName === "register") {
       const ignInput = interaction.options.getString("ign", true).trim();
-      const classInput = interaction.options.getString("class", true).trim();
+      const classInput = interaction.options.getString("class", true).trim().toUpperCase();
+      const nickname = interaction.member?.nickname || interaction.user.username;
 
       updateStore((next) => {
         if (!next.attendance[interaction.user.id]) {
@@ -338,6 +415,8 @@ client.on("interactionCreate", async (interaction) => {
         const record = next.attendance[interaction.user.id];
         record.profile = {
           ...record.profile,
+          discordId: interaction.user.id,
+          nickname,
           name: interaction.user.username,
           tag: interaction.user.tag,
           ign: ignInput,
@@ -348,9 +427,30 @@ client.on("interactionCreate", async (interaction) => {
       });
 
       await interaction.reply({
-        content: `Registration saved. IGN: ${ignInput}, Class: ${classInput}`,
+        content: `Registration saved. IGN: ${ignInput}, Class: ${classInput}, Nickname: ${nickname}`,
         ephemeral: true
       });
+      logSenateAction(
+        interaction,
+        "register",
+        `IGN=${ignInput}, Class=${classInput}`
+      );
+      return;
+    }
+
+    if (interaction.commandName === "profile") {
+      const record = store.attendance[interaction.user.id];
+      const profile = record?.profile || {};
+      const ign = profile.ign || "N/A";
+      const discordId = profile.discordId || interaction.user.id;
+      const points = record?.totalPoints || 0;
+      const rank = getRankForUser(store.attendance, interaction.user.id);
+
+      await interaction.reply({
+        content: `${rank || "N/A"} - ${ign} (${discordId}) - ${points}`,
+        ephemeral: true
+      });
+      logSenateAction(interaction, "profile", "Viewed profile");
       return;
     }
 

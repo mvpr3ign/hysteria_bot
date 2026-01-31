@@ -43,10 +43,10 @@ const createCommands = () => {
           .addChoices({ name: "all", value: "all" })
           .setRequired(false)
       )
-      .addUserOption((option) =>
+      .addStringOption((option) =>
         option
-          .setName("user")
-          .setDescription("Check another user")
+          .setName("ign")
+          .setDescription("Check another user by IGN")
           .setRequired(false)
       ),
     new SlashCommandBuilder()
@@ -65,8 +65,17 @@ const createCommands = () => {
         option
           .setName("class")
           .setDescription("Class")
+          .addChoices(
+            { name: "MELEE", value: "MELEE" },
+            { name: "MAGE", value: "MAGE" },
+            { name: "RANGER", value: "RANGER" },
+            { name: "SPEC", value: "SPEC" }
+          )
           .setRequired(true)
       ),
+    new SlashCommandBuilder()
+      .setName("profile")
+      .setDescription("Show your registered profile"),
     new SlashCommandBuilder()
       .setName("reset_points")
       .setDescription("Reset points (Senate only)")
