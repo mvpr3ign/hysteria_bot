@@ -519,11 +519,14 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      const { lines, total } = buildPointsList(store.attendance);
-      const content = lines.length ? lines.join("\n") : "No points recorded yet.";
-      const suffix = total > lines.length ? `\n...and ${total - lines.length} more.` : "";
+      const userId = interaction.user.id;
+      const record = store.attendance[userId];
+      const points = record?.totalPoints || 0;
+      const rank = getRankForUser(store.attendance, userId);
+      const ign = record?.profile?.ign || "N/A";
+      const content = `${rank || "N/A"} - ${ign} (${userId}) - ${points}`;
       await interaction.reply({
-        content: content + suffix,
+        content,
         ephemeral: true
       });
       return;
