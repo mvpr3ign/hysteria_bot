@@ -146,6 +146,12 @@ const createCommands = () => {
     new SlashCommandBuilder()
       .setName("audit_log")
       .setDescription("View Senate action log (Senate only)")
+      .addStringOption((option) =>
+        option
+          .setName("date")
+          .setDescription("MM-DD-YY (Philippine time)")
+          .setRequired(false)
+      )
   ];
 };
 

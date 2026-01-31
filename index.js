@@ -709,9 +709,14 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      const entries = store.auditLog.map((entry) => {
-        return `${entry.timestamp} - ${entry.action} by ${entry.performedByName} (${entry.performedBy}) - ${entry.details}`;
-      });
+      const dateInput = normalizeDateInput(interaction.options.getString("date"));
+      const entries = store.auditLog
+        .filter((entry) =>
+          dateInput ? entry.timestamp?.startsWith(dateInput) : true
+        )
+        .map((entry) => {
+          return `${entry.timestamp} - ${entry.action} by ${entry.performedByName} (${entry.performedBy}) - ${entry.details}`;
+        });
 
       const logText = entries.join("\n");
       if (logText.length <= 1800) {
