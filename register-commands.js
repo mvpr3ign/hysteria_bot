@@ -14,8 +14,18 @@ const createEventChoices = () => {
   return choices;
 };
 
+const createRegistrantChoices = () => {
+  const store = getStore();
+  const names = Object.values(store.attendance || {})
+    .map((entry) => entry?.profile?.nickname || entry?.profile?.name || entry?.profile?.tag)
+    .filter(Boolean);
+  const unique = Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+  return unique.slice(0, 25).map((name) => ({ name, value: name }));
+};
+
 const createCommands = () => {
   const eventChoices = createEventChoices();
+  const registrantChoices = createRegistrantChoices();
   return [
     new SlashCommandBuilder()
       .setName("cta")
@@ -123,6 +133,34 @@ const createCommands = () => {
           .setName("timestamp")
           .setDescription("Select a timestamp from the list")
           .setRequired(false)
+      ),
+    new SlashCommandBuilder()
+      .setName("end")
+      .setDescription("End the active CTA in this channel (Senate only)"),
+    new SlashCommandBuilder()
+      .setName("addpoints")
+      .setDescription("Add points to a registered member (Senate only)")
+      .addStringOption((option) =>
+        option
+          .setName("nickname")
+          .setDescription("Discord nickname of the member")
+          .addChoices(...registrantChoices)
+          .setRequired(true)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("points")
+          .setDescription("Points to add")
+          .setRequired(true)
+      ),
+    new SlashCommandBuilder()
+      .setName("addpoints_batch")
+      .setDescription("Add points in bulk via TXT file (Senate only)")
+      .addAttachmentOption((option) =>
+        option
+          .setName("file")
+          .setDescription("TXT file with lines: IGN,points")
+          .setRequired(true)
       ),
     new SlashCommandBuilder()
       .setName("reset_points")

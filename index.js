@@ -84,6 +84,11 @@ const normalizeIgn = (value) => {
   return value.trim().toUpperCase();
 };
 
+const normalizeName = (value) => {
+  if (!value) return "";
+  return value.trim().toUpperCase();
+};
+
 const generateCode = (length = 4) => {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const alphaNumeric = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -243,6 +248,18 @@ const findUsersByIgn = (attendance, ignInput) => {
     .map(([userId, data]) => ({ userId, data }));
 };
 
+const findUsersByNickname = (attendance, nicknameInput) => {
+  const normalizedNickname = normalizeName(nicknameInput);
+  if (!normalizedNickname) return [];
+  return Object.entries(attendance)
+    .filter(([, data]) => {
+      const profile = data?.profile || {};
+      const nickname = profile.nickname || profile.name || profile.tag || "";
+      return normalizeName(nickname) === normalizedNickname;
+    })
+    .map(([userId, data]) => ({ userId, data }));
+};
+
 const getAttendeeIds = (attendees) => {
   return (attendees || []).map((entry) => (typeof entry === "string" ? entry : entry.userId));
 };
@@ -322,10 +339,23 @@ client.on("interactionCreate", async (interaction) => {
           .setStyle(ButtonStyle.Primary)
       );
 
+      const createdDate = formatDate(new Date());
+      const countdown = `<t:${Math.floor(expiresAt / 1000)}:R>`;
       const message = await interaction.reply({
-        content: `Code: ${code}\nEvent: ${normalizedEvent}, ${points} points\nDuration: ${duration} minutes`,
+        content:
+          "NEW EVENT ACTIVE\n" +
+          `EVENT TYPE: ${normalizedEvent}\n` +
+          `DATE: ${createdDate}\n` +
+          `POINTS: ${points}\n` +
+          `DURATION: ${duration} minutes\n` +
+          `COUNTDOWN: ${countdown}`,
         components: [buttonRow],
         fetchReply: true
+      });
+
+      await interaction.followUp({
+        content: `CTA Code: ${code}`,
+        ephemeral: true
       });
 
       updateStore((next) => {
@@ -609,6 +639,250 @@ client.on("interactionCreate", async (interaction) => {
         interaction,
         "cta_attendance_view",
         `Event=${normalizedEvent}, Timestamp=${timestampInput}`
+      );
+      return;
+    }
+
+    if (interaction.commandName === "end") {
+      if (!ensureSenate(interaction)) {
+        await interaction.reply({
+          content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const channelId = interaction.channelId;
+      const activeCta = store.activeCtas[channelId];
+      if (!activeCta) {
+        await interaction.reply({
+          content: "No active CTA in this channel.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      await closeCta(channelId, activeCta);
+      await interaction.reply({
+        content: "CTA ended.",
+        ephemeral: true
+      });
+      logActivity(
+        interaction,
+        "cta_end",
+        `Event=${activeCta.eventType}, Channel=${channelId}`
+      );
+      return;
+    }
+
+    if (interaction.commandName === "addpoints") {
+      if (!ensureSenate(interaction)) {
+        await interaction.reply({
+          content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const nicknameInput = interaction.options.getString("nickname", true);
+      const pointsInput = interaction.options.getInteger("points", true);
+
+      if (!pointsInput || pointsInput <= 0) {
+        await interaction.reply({
+          content: "Points must be a positive number.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const matches = findUsersByNickname(store.attendance, nicknameInput);
+      if (!matches.length) {
+        await interaction.reply({
+          content: `No registered user found with nickname "${nicknameInput}".`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      if (matches.length > 1) {
+        const names = matches
+          .map(({ data, userId }) => data?.profile?.tag || data?.profile?.name || userId)
+          .join(", ");
+        await interaction.reply({
+          content: `Multiple users found for "${nicknameInput}": ${names}.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      const { userId, data } = matches[0];
+      const label = data?.profile?.ign || data?.profile?.name || data?.profile?.tag || userId;
+      const now = new Date();
+      const dateLabel = formatDate(now);
+      const timestamp = formatTimestamp(now);
+
+      updateStore((next) => {
+        if (!next.attendance[userId]) {
+          next.attendance[userId] = {
+            totalPoints: 0,
+            history: [],
+            profile: {}
+          };
+        }
+
+        const record = next.attendance[userId];
+        record.totalPoints += pointsInput;
+        record.history.push({
+          eventType: "MANUAL_ADJUSTMENT",
+          points: pointsInput,
+          date: dateLabel,
+          timestamp,
+          code: "MANUAL",
+          channelId: interaction.channelId,
+          guildId: interaction.guildId
+        });
+
+        return next;
+      });
+
+      await interaction.reply({
+        content: `Added ${pointsInput} points to ${label}.`,
+        ephemeral: true
+      });
+      logActivity(
+        interaction,
+        "addpoints",
+        `User=${userId}, Points=${pointsInput}`
+      );
+      return;
+    }
+
+    if (interaction.commandName === "addpoints_batch") {
+      if (!ensureSenate(interaction)) {
+        await interaction.reply({
+          content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const attachment = interaction.options.getAttachment("file", true);
+      if (!attachment?.url) {
+        await interaction.reply({
+          content: "Please attach a TXT file.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      let rawText = "";
+      try {
+        const response = await fetch(attachment.url);
+        rawText = await response.text();
+      } catch (error) {
+        await interaction.reply({
+          content: "Unable to read the attached file.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const lines = rawText
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      if (!lines.length) {
+        await interaction.reply({
+          content: "The file is empty.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const changes = [];
+      const errors = [];
+
+      lines.forEach((line) => {
+        const [ignPart, pointsPart] = line.split(",").map((value) => value?.trim());
+        if (!ignPart || !pointsPart) {
+          errors.push(`Invalid line: ${line}`);
+          return;
+        }
+
+        const pointsValue = Number.parseInt(pointsPart, 10);
+        if (!Number.isFinite(pointsValue) || pointsValue <= 0) {
+          errors.push(`Invalid points for ${ignPart}: ${pointsPart}`);
+          return;
+        }
+
+        const matches = findUsersByIgn(store.attendance, ignPart);
+        if (!matches.length) {
+          errors.push(`IGN not found: ${ignPart}`);
+          return;
+        }
+
+        if (matches.length > 1) {
+          errors.push(`IGN ambiguous: ${ignPart}`);
+          return;
+        }
+
+        changes.push({
+          userId: matches[0].userId,
+          ign: matches[0].data?.profile?.ign || ignPart,
+          points: pointsValue
+        });
+      });
+
+      if (!changes.length) {
+        await interaction.reply({
+          content: `No valid rows to apply.\n${errors.slice(0, 10).join("\n")}`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      const now = new Date();
+      const dateLabel = formatDate(now);
+      const timestamp = formatTimestamp(now);
+
+      updateStore((next) => {
+        changes.forEach((change) => {
+          if (!next.attendance[change.userId]) {
+            next.attendance[change.userId] = {
+              totalPoints: 0,
+              history: [],
+              profile: {}
+            };
+          }
+
+          const record = next.attendance[change.userId];
+          record.totalPoints += change.points;
+          record.history.push({
+            eventType: "BATCH_ADJUSTMENT",
+            points: change.points,
+            date: dateLabel,
+            timestamp,
+            code: "BATCH",
+            channelId: interaction.channelId,
+            guildId: interaction.guildId
+          });
+        });
+
+        return next;
+      });
+
+      const summary = `Applied ${changes.length} rows. ${errors.length} skipped.`;
+      const errorPreview = errors.length ? `\nErrors:\n${errors.slice(0, 10).join("\n")}` : "";
+
+      await interaction.reply({
+        content: summary + errorPreview,
+        ephemeral: true
+      });
+      logActivity(
+        interaction,
+        "addpoints_batch",
+        `Applied=${changes.length}, Errors=${errors.length}`
       );
       return;
     }
