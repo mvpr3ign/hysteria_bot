@@ -272,6 +272,24 @@ const findUsersByNickname = (attendance, nicknameInput) => {
     .map(([userId, data]) => ({ userId, data }));
 };
 
+const findUsersBySearch = (attendance, searchInput) => {
+  const normalizedSearch = normalizeName(searchInput);
+  if (!normalizedSearch) return [];
+  return Object.entries(attendance)
+    .filter(([, data]) => {
+      const profile = data?.profile || {};
+      const nickname = profile.nickname || profile.name || profile.tag || "";
+      const ign = profile.ign || "";
+      const tag = profile.tag || "";
+      return (
+        normalizeName(nickname) === normalizedSearch ||
+        normalizeIgn(ign) === normalizedSearch ||
+        normalizeName(tag) === normalizedSearch
+      );
+    })
+    .map(([userId, data]) => ({ userId, data }));
+};
+
 const getAttendeeIds = (attendees) => {
   return (attendees || []).map((entry) => (typeof entry === "string" ? entry : entry.userId));
 };
@@ -290,26 +308,68 @@ client.once("ready", () => {
 
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isAutocomplete()) {
-    if (interaction.commandName !== "cta_attendance") return;
     const store = getStore();
-    const eventInput = interaction.options.getString("event");
-    const dateInput = normalizeDateInput(interaction.options.getString("date"));
-    const normalizedEvent = normalizeEventName(eventInput);
 
-    if (!normalizedEvent || !dateInput) {
-      await interaction.respond([]);
+    if (interaction.commandName === "cta_attendance") {
+      const eventInput = interaction.options.getString("event");
+      const dateInput = normalizeDateInput(interaction.options.getString("date"));
+      const normalizedEvent = normalizeEventName(eventInput);
+
+      if (!normalizedEvent || !dateInput) {
+        await interaction.respond([]);
+        return;
+      }
+
+      const timestamps = (store.ctaHistory || [])
+        .filter((entry) => normalizeEventName(entry.eventType) === normalizedEvent)
+        .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateInput)
+        .map((entry) => formatManilaTimestamp(new Date(entry.createdAt)))
+        .sort()
+        .slice(0, 25)
+        .map((value) => ({ name: value, value }));
+
+      await interaction.respond(timestamps);
       return;
     }
 
-    const timestamps = (store.ctaHistory || [])
-      .filter((entry) => normalizeEventName(entry.eventType) === normalizedEvent)
-      .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateInput)
-      .map((entry) => formatManilaTimestamp(new Date(entry.createdAt)))
-      .sort()
-      .slice(0, 25)
-      .map((value) => ({ name: value, value }));
+    if (interaction.commandName === "addpoints") {
+      const focused = normalizeName(interaction.options.getFocused() || "");
+      const entries = Object.values(store.attendance || {}).map((entry) => {
+        const profile = entry?.profile || {};
+        return {
+          nickname: profile.nickname || profile.name || profile.tag || "",
+          ign: profile.ign || "",
+          tag: profile.tag || ""
+        };
+      });
 
-    await interaction.respond(timestamps);
+      const unique = new Map();
+      entries.forEach((entry) => {
+        if (!entry.nickname) return;
+        if (!unique.has(entry.nickname)) unique.set(entry.nickname, entry);
+      });
+
+      const filtered = Array.from(unique.values())
+        .filter((entry) => {
+          if (!focused) return true;
+          return (
+            normalizeName(entry.nickname).includes(focused) ||
+            normalizeIgn(entry.ign).includes(focused) ||
+            normalizeName(entry.tag).includes(focused)
+          );
+        })
+        .sort((a, b) => a.nickname.localeCompare(b.nickname))
+        .slice(0, 25)
+        .map((entry) => ({
+          name: `${entry.nickname}${entry.ign ? ` | ${entry.ign}` : ""}${entry.tag ? ` | ${entry.tag}` : ""}`,
+          value: entry.nickname
+        }));
+
+      await interaction.respond(filtered);
+      return;
+    }
+
+    await interaction.respond([]);
     return;
   }
 
@@ -803,7 +863,10 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const matches = findUsersByNickname(store.attendance, nicknameInput);
-      if (!matches.length) {
+      const searchMatches = matches.length
+        ? matches
+        : findUsersBySearch(store.attendance, nicknameInput);
+      if (!searchMatches.length) {
         await interaction.reply({
           content: `No registered user found with nickname "${nicknameInput}".`,
           ephemeral: true
@@ -811,8 +874,8 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      if (matches.length > 1) {
-        const names = matches
+      if (searchMatches.length > 1) {
+        const names = searchMatches
           .map(({ data, userId }) => data?.profile?.tag || data?.profile?.name || userId)
           .join(", ");
         await interaction.reply({
@@ -822,7 +885,7 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      const { userId, data } = matches[0];
+      const { userId, data } = searchMatches[0];
       const label = data?.profile?.ign || data?.profile?.name || data?.profile?.tag || userId;
       const now = new Date();
       const dateLabel = formatDate(now);

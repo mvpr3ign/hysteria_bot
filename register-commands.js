@@ -14,18 +14,8 @@ const createEventChoices = () => {
   return choices;
 };
 
-const createRegistrantChoices = () => {
-  const store = getStore();
-  const names = Object.values(store.attendance || {})
-    .map((entry) => entry?.profile?.nickname || entry?.profile?.name || entry?.profile?.tag)
-    .filter(Boolean);
-  const unique = Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
-  return unique.slice(0, 25).map((name) => ({ name, value: name }));
-};
-
 const createCommands = () => {
   const eventChoices = createEventChoices();
-  const registrantChoices = createRegistrantChoices();
   return [
     new SlashCommandBuilder()
       .setName("cta")
@@ -166,7 +156,7 @@ const createCommands = () => {
         option
           .setName("nickname")
           .setDescription("Discord nickname of the member")
-          .addChoices(...registrantChoices)
+          .setAutocomplete(true)
           .setRequired(true)
       )
       .addIntegerOption((option) =>
