@@ -571,9 +571,11 @@ client.on("interactionCreate", async (interaction) => {
         const points = data?.totalPoints || 0;
         const rank = getRankForUser(store.attendance, userId);
         const label = data?.profile?.ign || data?.profile?.name || data?.profile?.tag || userId;
+        const nickname =
+          data?.profile?.nickname || data?.profile?.name || data?.profile?.tag || userId;
 
         await interaction.reply({
-          content: `${rank || "N/A"} - ${label} (${userId}) - ${points}`,
+          content: `${rank || "N/A"}. ${nickname} - ${label} - Points: ${points}`,
           ephemeral: true
         });
         return;
@@ -584,7 +586,9 @@ client.on("interactionCreate", async (interaction) => {
       const points = record?.totalPoints || 0;
       const rank = getRankForUser(store.attendance, userId);
       const ign = record?.profile?.ign || "N/A";
-      const content = `${rank || "N/A"} - ${ign} (${userId}) - ${points}`;
+      const nickname =
+        record?.profile?.nickname || record?.profile?.name || record?.profile?.tag || userId;
+      const content = `${rank || "N/A"}. ${nickname} - ${ign} - Points: ${points}`;
       await interaction.reply({
         content,
         ephemeral: true
