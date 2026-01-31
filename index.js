@@ -24,6 +24,7 @@ const normalizeEventName = (value) => {
 
 const formatDate = (date) => {
   return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
     month: "2-digit",
     day: "2-digit",
     year: "numeric"
@@ -32,14 +33,51 @@ const formatDate = (date) => {
 
 const formatTimestamp = (date) => {
   return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
     month: "2-digit",
     day: "2-digit",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit"
+    second: "2-digit",
+    hour12: false
   }).format(date);
 };
+
+const formatManilaDate = (date) => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    month: "2-digit",
+    day: "2-digit",
+    year: "2-digit"
+  }).formatToParts(date);
+  const month = parts.find((part) => part.type === "month")?.value || "01";
+  const day = parts.find((part) => part.type === "day")?.value || "01";
+  const year = parts.find((part) => part.type === "year")?.value || "00";
+  return `${month}-${day}-${year}`;
+};
+
+const formatManilaTimestamp = (date) => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    month: "2-digit",
+    day: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+  const month = parts.find((part) => part.type === "month")?.value || "01";
+  const day = parts.find((part) => part.type === "day")?.value || "01";
+  const year = parts.find((part) => part.type === "year")?.value || "00";
+  const hour = parts.find((part) => part.type === "hour")?.value || "00";
+  const minute = parts.find((part) => part.type === "minute")?.value || "00";
+  const second = parts.find((part) => part.type === "second")?.value || "00";
+  return `${month}-${day}-${year} ${hour}:${minute}:${second}`;
+};
+
+const normalizeDateInput = (value) => (value || "").trim();
 
 const normalizeIgn = (value) => {
   if (!value) return "";
@@ -108,6 +146,39 @@ const closeCta = async (channelId, cta) => {
       }
     }
 
+    updateStore((store) => {
+      const attendees = (cta.attendees || []).map((entry) => {
+        const userId = typeof entry === "string" ? entry : entry.userId;
+        const joinedAt = typeof entry === "string" ? null : entry.joinedAt;
+        const record = store.attendance[userId];
+        const profile = record?.profile || {};
+        return {
+          userId,
+          ign: profile.ign || profile.name || profile.tag || userId,
+          nickname: profile.nickname || profile.name || profile.tag || "",
+          points: cta.points,
+          joinedAt: joinedAt || "N/A"
+        };
+      });
+
+      store.ctaHistory.push({
+        eventType: cta.eventType,
+        points: cta.points,
+        createdAt: cta.createdAt,
+        closedAt: Date.now(),
+        channelId,
+        guildId: cta.guildId,
+        attendees
+      });
+      return store;
+    });
+
+    appendAuditLog(
+      "cta_closed",
+      null,
+      `Event=${cta.eventType}, Channel=${channelId}`
+    );
+
     await channel.send("Event registration has closed.");
   } catch (error) {
     console.error("Failed to close CTA:", error);
@@ -120,20 +191,21 @@ const ensureSenate = (interaction) => {
 };
 
 const appendAuditLog = (action, interaction, details) => {
+  const performedBy = interaction?.user?.id || "system";
+  const performedByName = interaction?.user?.tag || "system";
   updateStore((store) => {
     store.auditLog.push({
       action,
-      performedBy: interaction.user.id,
-      performedByName: interaction.user.tag,
-      timestamp: new Date().toISOString(),
+      performedBy,
+      performedByName,
+      timestamp: formatManilaTimestamp(new Date()),
       details
     });
     return store;
   });
 };
 
-const logSenateAction = (interaction, action, details) => {
-  if (!ensureSenate(interaction)) return;
+const logActivity = (interaction, action, details) => {
   appendAuditLog(action, interaction, details);
 };
 
@@ -171,6 +243,10 @@ const findUsersByIgn = (attendance, ignInput) => {
     .map(([userId, data]) => ({ userId, data }));
 };
 
+const getAttendeeIds = (attendees) => {
+  return (attendees || []).map((entry) => (typeof entry === "string" ? entry : entry.userId));
+};
+
 client.once("ready", () => {
   console.log(`Logged in as ${client.user.tag}`);
   const store = getStore();
@@ -188,9 +264,33 @@ client.on("interactionCreate", async (interaction) => {
     const store = getStore();
 
     if (interaction.commandName === "cta") {
+      if (!ensureSenate(interaction)) {
+        await interaction.reply({
+          content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
+      }
+
       const eventInput = interaction.options.getString("event", true);
-      const normalizedEvent = normalizeEventName(eventInput);
-      const points = store.eventPoints[normalizedEvent];
+      const descriptionInput = interaction.options.getString("description");
+      const pointsInput = interaction.options.getInteger("points");
+      let normalizedEvent = normalizeEventName(eventInput);
+      let points = store.eventPoints[normalizedEvent];
+
+      if (normalizedEvent === "OTHERS") {
+        if (!descriptionInput || !pointsInput || pointsInput <= 0) {
+          await interaction.reply({
+            content: "For OTHERS, provide a description and positive points value.",
+            ephemeral: true
+          });
+          return;
+        }
+
+        normalizedEvent = normalizeEventName(descriptionInput);
+        points = pointsInput;
+      }
+
       if (!points) {
         await interaction.reply({
           content: `Unknown event "${normalizedEvent}". Use /set_event to add it.`,
@@ -243,7 +343,7 @@ client.on("interactionCreate", async (interaction) => {
         return next;
       });
 
-      logSenateAction(
+      logActivity(
         interaction,
         "cta_created",
         `Event=${normalizedEvent}, Points=${points}, Duration=${duration}m, Channel=${channelId}`
@@ -254,11 +354,17 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.commandName === "list_events") {
+      if (!ensureSenate(interaction)) {
+        await interaction.reply({
+          content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
+      }
+
       const lines = Object.entries(store.eventPoints)
         .map(([name, value]) => `${name} = ${value} pts`)
         .join("\n");
-
-      logSenateAction(interaction, "list_events", "Listed event points");
 
       await interaction.reply({
         content: lines.length ? lines : "No events set.",
@@ -285,9 +391,9 @@ client.on("interactionCreate", async (interaction) => {
         return next;
       });
 
-      appendAuditLog(
-        "set_event",
+      logActivity(
         interaction,
+        "set_event",
         `Event=${normalizedEvent}, Points=${points}`
       );
 
@@ -310,7 +416,6 @@ client.on("interactionCreate", async (interaction) => {
           content: content + suffix,
           ephemeral: true
         });
-        logSenateAction(interaction, "points_all", "Viewed all points");
         return;
       }
 
@@ -322,11 +427,6 @@ client.on("interactionCreate", async (interaction) => {
             content: `No user found with IGN "${ignInput}".`,
             ephemeral: true
           });
-        logSenateAction(
-          interaction,
-          "points_ign_not_found",
-          `IGN=${ignInput}`
-        );
           return;
         }
 
@@ -338,11 +438,6 @@ client.on("interactionCreate", async (interaction) => {
             content: `Multiple users found with IGN "${ignInput}": ${names}.`,
             ephemeral: true
           });
-        logSenateAction(
-          interaction,
-          "points_ign_ambiguous",
-          `IGN=${ignInput}, Matches=${names}`
-        );
           return;
         }
 
@@ -355,11 +450,6 @@ client.on("interactionCreate", async (interaction) => {
           content: `${rank || "N/A"} - ${label} (${userId}) - ${points}`,
           ephemeral: true
         });
-        logSenateAction(
-          interaction,
-          "points_ign",
-          `IGN=${label}, Points=${points}, Rank=${rank || "N/A"}`
-        );
         return;
       }
 
@@ -370,7 +460,6 @@ client.on("interactionCreate", async (interaction) => {
         content: content + suffix,
         ephemeral: true
       });
-      logSenateAction(interaction, "points_all_default", "Viewed all points");
       return;
     }
 
@@ -388,8 +477,6 @@ client.on("interactionCreate", async (interaction) => {
         (entry, index) =>
           `${index + 1} - ${entry.ign} (${entry.userId}) - ${entry.points}`
       );
-
-      logSenateAction(interaction, "leaderboard", "Viewed leaderboard");
 
       await interaction.reply({
         content: lines.length ? lines.join("\n") : "No points recorded yet.",
@@ -430,7 +517,7 @@ client.on("interactionCreate", async (interaction) => {
         content: `Registration saved. IGN: ${ignInput}, Class: ${classInput}, Nickname: ${nickname}`,
         ephemeral: true
       });
-      logSenateAction(
+      logActivity(
         interaction,
         "register",
         `IGN=${ignInput}, Class=${classInput}`
@@ -450,10 +537,81 @@ client.on("interactionCreate", async (interaction) => {
         content: `${rank || "N/A"} - ${ign} (${discordId}) - ${points}`,
         ephemeral: true
       });
-      logSenateAction(interaction, "profile", "Viewed profile");
       return;
     }
 
+    if (interaction.commandName === "cta_attendance") {
+      if (!ensureSenate(interaction)) {
+        await interaction.reply({
+          content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const eventInput = interaction.options.getString("event", true);
+      const dateInput = normalizeDateInput(interaction.options.getString("date", true));
+      const timestampInput = normalizeDateInput(interaction.options.getString("timestamp"));
+      const normalizedEvent = normalizeEventName(eventInput);
+
+      const matches = (store.ctaHistory || [])
+        .filter((entry) => normalizeEventName(entry.eventType) === normalizedEvent)
+        .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateInput);
+
+      if (!matches.length) {
+        await interaction.reply({
+          content: `No CTA history found for ${normalizedEvent} on ${dateInput}.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      if (!timestampInput) {
+        const timestamps = matches
+          .map((entry) => formatManilaTimestamp(new Date(entry.createdAt)))
+          .sort();
+        await interaction.reply({
+          content:
+            `Available timestamps for ${normalizedEvent} on ${dateInput} (PH time):\n` +
+            timestamps.join("\n"),
+          ephemeral: true
+        });
+        logActivity(
+          interaction,
+          "cta_attendance_list",
+          `Event=${normalizedEvent}, Date=${dateInput}`
+        );
+        return;
+      }
+
+      const selected = matches.find(
+        (entry) => formatManilaTimestamp(new Date(entry.createdAt)) === timestampInput
+      );
+
+      if (!selected) {
+        await interaction.reply({
+          content: `Timestamp not found. Use /cta_attendance to list available timestamps.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      const lines = (selected.attendees || []).map(
+        (attendee) =>
+          `${attendee.ign || "N/A"} - ${attendee.nickname || "N/A"} - ${attendee.points}`
+      );
+
+      await interaction.reply({
+        content: lines.length ? lines.join("\n") : "No attendees recorded.",
+        ephemeral: true
+      });
+      logActivity(
+        interaction,
+        "cta_attendance_view",
+        `Event=${normalizedEvent}, Timestamp=${timestampInput}`
+      );
+      return;
+    }
     if (interaction.commandName === "reset_points") {
       if (!ensureSenate(interaction)) {
         await interaction.reply({
@@ -472,7 +630,7 @@ client.on("interactionCreate", async (interaction) => {
           return next;
         });
 
-        appendAuditLog("reset_all", interaction, "All points reset");
+        logActivity(interaction, "reset_all", "All points reset");
 
         await interaction.reply({
           content: "All points have been reset.",
@@ -494,7 +652,7 @@ client.on("interactionCreate", async (interaction) => {
         return next;
       });
 
-      appendAuditLog("reset_user", interaction, `Reset points for ${targetUser.id}`);
+      logActivity(interaction, "reset_user", `Reset points for ${targetUser.id}`);
 
       await interaction.reply({
         content: `Points for ${targetUser.tag} have been reset.`,
@@ -532,7 +690,7 @@ client.on("interactionCreate", async (interaction) => {
         name: "points-export.csv"
       });
 
-      appendAuditLog("export_points", interaction, "Exported points CSV");
+      logActivity(interaction, "export_points", "Exported points CSV");
 
       await interaction.reply({
         content: "CSV export ready.",
@@ -567,6 +725,8 @@ client.on("interactionCreate", async (interaction) => {
       const file = new AttachmentBuilder(Buffer.from(logText, "utf-8"), {
         name: "audit-log.txt"
       });
+
+      logActivity(interaction, "audit_log", "Viewed audit log");
 
       await interaction.reply({
         content: "Audit log attached.",
@@ -643,7 +803,7 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    if (cta.attendees.includes(interaction.user.id)) {
+    if (getAttendeeIds(cta.attendees).includes(interaction.user.id)) {
       await interaction.reply({
         content: "You have already joined this CTA.",
         ephemeral: true
@@ -658,7 +818,10 @@ client.on("interactionCreate", async (interaction) => {
     updateStore((next) => {
       const updatedCta = next.activeCtas[channelId];
       if (updatedCta) {
-        updatedCta.attendees.push(interaction.user.id);
+        updatedCta.attendees.push({
+          userId: interaction.user.id,
+          joinedAt: formatManilaTimestamp(now)
+        });
       }
 
       if (!next.attendance[interaction.user.id]) {
@@ -692,6 +855,11 @@ client.on("interactionCreate", async (interaction) => {
       content: `Your attendance for ${cta.eventType} - ${dateLabel}, has been recorded on ${timestamp}!`,
       ephemeral: true
     });
+    logActivity(
+      interaction,
+      "cta_join",
+      `Event=${cta.eventType}, Channel=${channelId}, Points=${cta.points}`
+    );
   }
 });
 

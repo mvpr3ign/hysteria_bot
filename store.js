@@ -12,6 +12,7 @@ const defaultStore = {
     PBS: 1
   },
   activeCtas: {},
+  ctaHistory: [],
   attendance: {},
   auditLog: []
 };

@@ -1,7 +1,21 @@
 const { REST, Routes, SlashCommandBuilder } = require("discord.js");
 const { config } = require("./config");
+const { getStore } = require("./store");
+
+const createEventChoices = () => {
+  const store = getStore();
+  const eventNames = Object.keys(store.eventPoints || {})
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  const limited = eventNames.slice(0, 24);
+  const choices = limited.map((name) => ({ name, value: name }));
+  choices.push({ name: "OTHERS", value: "OTHERS" });
+  return choices;
+};
 
 const createCommands = () => {
+  const eventChoices = createEventChoices();
   return [
     new SlashCommandBuilder()
       .setName("cta")
@@ -10,7 +24,20 @@ const createCommands = () => {
         option
           .setName("event")
           .setDescription("Event type (e.g. CW1)")
+          .addChoices(...eventChoices)
           .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("description")
+          .setDescription("Required if event is OTHERS")
+          .setRequired(false)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("points")
+          .setDescription("Required if event is OTHERS")
+          .setRequired(false)
       )
       .addIntegerOption((option) =>
         option
@@ -76,6 +103,27 @@ const createCommands = () => {
     new SlashCommandBuilder()
       .setName("profile")
       .setDescription("Show your registered profile"),
+    new SlashCommandBuilder()
+      .setName("cta_attendance")
+      .setDescription("View CTA attendance by event and date (Senate only)")
+      .addStringOption((option) =>
+        option
+          .setName("event")
+          .setDescription("Event type (e.g. CW1)")
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("date")
+          .setDescription("MM-DD-YY (Philippine time)")
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("timestamp")
+          .setDescription("Select a timestamp from the list")
+          .setRequired(false)
+      ),
     new SlashCommandBuilder()
       .setName("reset_points")
       .setDescription("Reset points (Senate only)")
