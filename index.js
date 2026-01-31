@@ -948,7 +948,11 @@ client.on("interactionCreate", async (interaction) => {
 
       if (scope === "all") {
         updateStore((next) => {
-          next.attendance = {};
+          Object.values(next.attendance).forEach((record) => {
+            if (!record) return;
+            record.totalPoints = 0;
+            record.history = [];
+          });
           return next;
         });
 
@@ -970,7 +974,15 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       updateStore((next) => {
-        delete next.attendance[targetUser.id];
+        if (!next.attendance[targetUser.id]) {
+          next.attendance[targetUser.id] = {
+            totalPoints: 0,
+            history: [],
+            profile: {}
+          };
+        }
+        next.attendance[targetUser.id].totalPoints = 0;
+        next.attendance[targetUser.id].history = [];
         return next;
       });
 
