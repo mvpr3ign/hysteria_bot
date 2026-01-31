@@ -289,6 +289,30 @@ client.once("ready", () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  if (interaction.isAutocomplete()) {
+    if (interaction.commandName !== "cta_attendance") return;
+    const store = getStore();
+    const eventInput = interaction.options.getString("event");
+    const dateInput = normalizeDateInput(interaction.options.getString("date"));
+    const normalizedEvent = normalizeEventName(eventInput);
+
+    if (!normalizedEvent || !dateInput) {
+      await interaction.respond([]);
+      return;
+    }
+
+    const timestamps = (store.ctaHistory || [])
+      .filter((entry) => normalizeEventName(entry.eventType) === normalizedEvent)
+      .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateInput)
+      .map((entry) => formatManilaTimestamp(new Date(entry.createdAt)))
+      .sort()
+      .slice(0, 25)
+      .map((value) => ({ name: value, value }));
+
+    await interaction.respond(timestamps);
+    return;
+  }
+
   if (interaction.isChatInputCommand()) {
     const store = getStore();
 
@@ -542,6 +566,9 @@ client.on("interactionCreate", async (interaction) => {
         }
 
         const record = next.attendance[interaction.user.id];
+        if (record.profile?.ign && record.profile?.class) {
+          return next;
+        }
         record.profile = {
           ...record.profile,
           discordId: interaction.user.id,
@@ -554,6 +581,15 @@ client.on("interactionCreate", async (interaction) => {
 
         return next;
       });
+
+      const existingRecord = store.attendance[interaction.user.id];
+      if (existingRecord?.profile?.ign && existingRecord?.profile?.class) {
+        await interaction.reply({
+          content: "You are already registered.",
+          ephemeral: true
+        });
+        return;
+      }
 
       await interaction.reply({
         content: `Registration saved. IGN: ${ignInput}, Class: ${classInput}, Nickname: ${nickname}`,
@@ -1135,8 +1171,10 @@ client.on("interactionCreate", async (interaction) => {
         guildId: interaction.guildId
       });
       record.profile = {
+        ...record.profile,
         name: interaction.user.username,
-        tag: interaction.user.tag
+        tag: interaction.user.tag,
+        nickname: interaction.member?.nickname || record.profile?.nickname || interaction.user.username
       };
 
       return next;

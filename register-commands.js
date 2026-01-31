@@ -132,6 +132,7 @@ const createCommands = () => {
         option
           .setName("timestamp")
           .setDescription("Select a timestamp from the list")
+          .setAutocomplete(true)
           .setRequired(false)
       ),
     new SlashCommandBuilder()
