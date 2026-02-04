@@ -128,11 +128,6 @@ const handleCtaExpiration = async (channelId) => {
 };
 
 const closeCta = async (channelId, cta) => {
-  updateStore((store) => {
-    delete store.activeCtas[channelId];
-    return store;
-  });
-
   try {
     const channel = await client.channels.fetch(channelId);
     if (!channel) return;
@@ -164,6 +159,7 @@ const closeCta = async (channelId, cta) => {
     }
 
     updateStore((store) => {
+      delete store.activeCtas[channelId];
       const attendees = (cta.attendees || []).map((entry) => {
         const userId = typeof entry === "string" ? entry : entry.userId;
         const joinedAt = typeof entry === "string" ? null : entry.joinedAt;
@@ -295,16 +291,31 @@ const getAttendeeIds = (attendees) => {
   return (attendees || []).map((entry) => (typeof entry === "string" ? entry : entry.userId));
 };
 
+const sweepExpiredCtas = async () => {
+  const store = getStore();
+  const expired = Object.entries(store.activeCtas).filter(([, cta]) =>
+    isExpired(cta.expiresAt)
+  );
+
+  await Promise.all(
+    expired.map(([channelId, cta]) => closeCta(channelId, cta))
+  );
+};
+
 client.once("ready", () => {
   console.log(`Logged in as ${client.user.tag}`);
   const store = getStore();
   Object.entries(store.activeCtas).forEach(([channelId, cta]) => {
     if (isExpired(cta.expiresAt)) {
-      handleCtaExpiration(channelId);
+      closeCta(channelId, cta);
     } else {
       scheduleCtaClose(channelId, cta.expiresAt);
     }
   });
+
+  setInterval(() => {
+    sweepExpiredCtas();
+  }, 60 * 1000);
 });
 
 client.on("interactionCreate", async (interaction) => {
