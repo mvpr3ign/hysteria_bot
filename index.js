@@ -549,8 +549,22 @@ client.on("interactionCreate", async (interaction) => {
         const { lines, total } = buildPointsList(store.attendance);
         const content = lines.length ? lines.join("\n") : "No points recorded yet.";
         const suffix = total > lines.length ? `\n...and ${total - lines.length} more.` : "";
+        const fullContent = content + suffix;
+
+        if (fullContent.length <= 1800) {
+          await interaction.reply({
+            content: fullContent,
+            ephemeral: true
+          });
+          return;
+        }
+
+        const file = new AttachmentBuilder(Buffer.from(fullContent, "utf-8"), {
+          name: "points-list.txt"
+        });
         await interaction.reply({
-          content: content + suffix,
+          content: "Points list attached.",
+          files: [file],
           ephemeral: true
         });
         return;
