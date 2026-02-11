@@ -230,8 +230,13 @@ const getRankForUser = (attendance, userId) => {
   return index === -1 ? null : index + 1;
 };
 
+const isInactiveUser = (record) => {
+  return record?.profile?.inactive === true;
+};
+
 const buildPointsList = (attendance, limit = 200) => {
   const entries = Object.entries(attendance)
+    .filter(([, data]) => !isInactiveUser(data))
     .map(([userId, data]) => ({
       userId,
       ign: data?.profile?.ign || data?.profile?.name || data?.profile?.tag || userId,
@@ -634,6 +639,7 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.commandName === "leaderboard") {
       const entries = Object.entries(store.attendance)
+        .filter(([, data]) => !isInactiveUser(data))
         .map(([userId, data]) => ({
           userId,
           ign: data?.profile?.ign || data?.profile?.name || data?.profile?.tag || userId,
@@ -1177,6 +1183,53 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
+    if (interaction.commandName === "set") {
+      if (!ensureSenate(interaction)) {
+        await interaction.reply({
+          content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const targetUser = interaction.options.getUser("user", true);
+      const statusInput = interaction.options.getString("status", true);
+      const markInactive = statusInput === "inactive";
+
+      updateStore((next) => {
+        if (!next.attendance[targetUser.id]) {
+          next.attendance[targetUser.id] = {
+            totalPoints: 0,
+            history: [],
+            profile: {}
+          };
+        }
+
+        const record = next.attendance[targetUser.id];
+        record.profile = {
+          ...record.profile,
+          discordId: targetUser.id,
+          name: targetUser.username,
+          tag: targetUser.tag,
+          inactive: markInactive
+        };
+
+        return next;
+      });
+
+      logActivity(
+        interaction,
+        "set_inactive",
+        `User=${targetUser.id}, Inactive=${markInactive}`
+      );
+
+      await interaction.reply({
+        content: `${targetUser.tag} is now marked as ${markInactive ? "inactive" : "active"}.`,
+        ephemeral: true
+      });
+      return;
+    }
+
     if (interaction.commandName === "export_points") {
       if (!ensureSenate(interaction)) {
         await interaction.reply({
@@ -1190,6 +1243,7 @@ client.on("interactionCreate", async (interaction) => {
         "userId,username,ign,class,totalPoints,lastEvent,lastTimestamp"
       ];
       Object.entries(store.attendance).forEach(([userId, data]) => {
+        if (isInactiveUser(data)) return;
         const last = data.history?.[data.history.length - 1];
         const username = data?.profile?.name || data?.profile?.tag || "";
         const ign = data?.profile?.ign || "";
@@ -1310,6 +1364,14 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.reply({
         content:
           "You are not a registered member of Hysteria Guild. Please register using /register <IGN> <CLASS>",
+        ephemeral: true
+      });
+      return;
+    }
+
+    if (isInactiveUser(registeredRecord)) {
+      await interaction.reply({
+        content: "You're tagged as an inactive player. Please contact guildleader",
         ephemeral: true
       });
       return;

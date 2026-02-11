@@ -215,6 +215,25 @@ const createCommands = () => {
           .setRequired(false)
       ),
     new SlashCommandBuilder()
+      .setName("set")
+      .setDescription("Tag a player as inactive or active (Senate only)")
+      .addUserOption((option) =>
+        option
+          .setName("user")
+          .setDescription("Player to update")
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("status")
+          .setDescription("Set to inactive or active")
+          .addChoices(
+            { name: "inactive", value: "inactive" },
+            { name: "active", value: "active" }
+          )
+          .setRequired(true)
+      ),
+    new SlashCommandBuilder()
       .setName("export_points")
       .setDescription("Export all points to CSV (Senate only)"),
     new SlashCommandBuilder()
