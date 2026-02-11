@@ -254,6 +254,36 @@ const buildPointsList = (attendance, limit = 200) => {
   return { lines, total: entries.length };
 };
 
+const buildRegisteredUserChoices = (attendance, focusedValue) => {
+  const focused = normalizeName(focusedValue || "");
+  const entries = Object.entries(attendance || {})
+    .map(([userId, data]) => {
+      const profile = data?.profile || {};
+      const nickname = profile.nickname || profile.name || profile.tag || "";
+      const ign = profile.ign || "";
+      const tag = profile.tag || "";
+      return { userId, nickname, ign, tag };
+    })
+    .filter((entry) => entry.nickname || entry.ign || entry.tag);
+
+  const filtered = entries.filter((entry) => {
+    if (!focused) return true;
+    return (
+      normalizeName(entry.nickname).includes(focused) ||
+      normalizeIgn(entry.ign).includes(focused) ||
+      normalizeName(entry.tag).includes(focused)
+    );
+  });
+
+  return filtered
+    .sort((a, b) => (a.nickname || a.tag).localeCompare(b.nickname || b.tag))
+    .slice(0, 25)
+    .map((entry) => ({
+      name: `${entry.nickname || entry.tag || entry.userId}${entry.ign ? ` | ${entry.ign}` : ""}${entry.tag ? ` | ${entry.tag}` : ""}`,
+      value: entry.userId
+    }));
+};
+
 const findUsersByIgn = (attendance, ignInput) => {
   const normalizedIgn = normalizeIgn(ignInput);
   if (!normalizedIgn) return [];
@@ -383,6 +413,13 @@ client.on("interactionCreate", async (interaction) => {
         }));
 
       await interaction.respond(filtered);
+      return;
+    }
+
+    if (interaction.commandName === "set") {
+      const focusedValue = interaction.options.getFocused() || "";
+      const choices = buildRegisteredUserChoices(store.attendance, focusedValue);
+      await interaction.respond(choices);
       return;
     }
 
@@ -1192,25 +1229,35 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      const targetUser = interaction.options.getUser("user", true);
+      const targetUserId = interaction.options.getString("user", true);
       const statusInput = interaction.options.getString("status", true);
       const markInactive = statusInput === "inactive";
 
+      const targetRecord = store.attendance?.[targetUserId];
+      if (!targetRecord) {
+        await interaction.reply({
+          content: "Selected user is not registered.",
+          ephemeral: true
+        });
+        return;
+      }
+
       updateStore((next) => {
-        if (!next.attendance[targetUser.id]) {
-          next.attendance[targetUser.id] = {
+        if (!next.attendance[targetUserId]) {
+          next.attendance[targetUserId] = {
             totalPoints: 0,
             history: [],
             profile: {}
           };
         }
 
-        const record = next.attendance[targetUser.id];
+        const record = next.attendance[targetUserId];
+        const existingProfile = record.profile || {};
         record.profile = {
           ...record.profile,
-          discordId: targetUser.id,
-          name: targetUser.username,
-          tag: targetUser.tag,
+          discordId: existingProfile.discordId || targetUserId,
+          name: existingProfile.name,
+          tag: existingProfile.tag,
           inactive: markInactive
         };
 
@@ -1220,11 +1267,17 @@ client.on("interactionCreate", async (interaction) => {
       logActivity(
         interaction,
         "set_inactive",
-        `User=${targetUser.id}, Inactive=${markInactive}`
+        `User=${targetUserId}, Inactive=${markInactive}`
       );
 
+      const label =
+        targetRecord?.profile?.tag ||
+        targetRecord?.profile?.name ||
+        targetRecord?.profile?.nickname ||
+        targetUserId;
+
       await interaction.reply({
-        content: `${targetUser.tag} is now marked as ${markInactive ? "inactive" : "active"}.`,
+        content: `${label} is now marked as ${markInactive ? "inactive" : "active"}.`,
         ephemeral: true
       });
       return;

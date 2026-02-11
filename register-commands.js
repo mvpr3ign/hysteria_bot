@@ -217,10 +217,11 @@ const createCommands = () => {
     new SlashCommandBuilder()
       .setName("set")
       .setDescription("Tag a player as inactive or active (Senate only)")
-      .addUserOption((option) =>
+      .addStringOption((option) =>
         option
           .setName("user")
           .setDescription("Player to update")
+          .setAutocomplete(true)
           .setRequired(true)
       )
       .addStringOption((option) =>
