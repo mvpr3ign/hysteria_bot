@@ -261,10 +261,9 @@ const buildRegisteredUserChoices = (attendance, focusedValue) => {
       const profile = data?.profile || {};
       const nickname = profile.nickname || profile.name || profile.tag || "";
       const ign = profile.ign || "";
-      const tag = profile.tag || "";
-      return { userId, nickname, ign, tag };
+      return { userId, nickname, ign };
     })
-    .filter((entry) => entry.nickname || entry.ign || entry.tag);
+    .filter((entry) => entry.nickname && entry.ign);
 
   const filtered = entries.filter((entry) => {
     if (!focused) return true;
@@ -276,10 +275,10 @@ const buildRegisteredUserChoices = (attendance, focusedValue) => {
   });
 
   return filtered
-    .sort((a, b) => (a.nickname || a.tag).localeCompare(b.nickname || b.tag))
+    .sort((a, b) => a.nickname.localeCompare(b.nickname))
     .slice(0, 25)
     .map((entry) => ({
-      name: `${entry.nickname || entry.tag || entry.userId}${entry.ign ? ` | ${entry.ign}` : ""}${entry.tag ? ` | ${entry.tag}` : ""}`,
+      name: `${entry.nickname} - ${entry.ign}`,
       value: entry.userId
     }));
 };
