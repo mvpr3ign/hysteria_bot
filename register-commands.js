@@ -4,12 +4,16 @@ const { getStore } = require("./store");
 
 const createEventChoices = () => {
   const store = getStore();
-  const eventNames = Object.keys(store.eventPoints || {})
+  const eventPoints = store.eventPoints || {};
+  const eventNames = Object.keys(eventPoints)
     .map((name) => name.trim())
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b));
   const limited = eventNames.slice(0, 24);
-  const choices = limited.map((name) => ({ name, value: name }));
+  const choices = limited.map((name) => ({
+    name: `${name} = ${eventPoints[name]} pts`,
+    value: name
+  }));
   choices.push({ name: "OTHERS", value: "OTHERS" });
   return choices;
 };
