@@ -54,6 +54,22 @@ const createCommands = () => {
         option.setName("points").setDescription("Points").setRequired(true)
       ),
     new SlashCommandBuilder()
+      .setName("delete_event")
+      .setDescription("Delete an event type (Senate only)")
+      .addStringOption((option) =>
+        option
+          .setName("password")
+          .setDescription("Approval password")
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("event")
+          .setDescription("Event type name")
+          .setAutocomplete(true)
+          .setRequired(true)
+      ),
+    new SlashCommandBuilder()
       .setName("points")
       .setDescription("Show points")
       .addStringOption((option) =>

@@ -283,7 +283,7 @@ const buildRegisteredUserChoices = (attendance, focusedValue) => {
     }));
 };
 
-const buildCtaEventChoices = (eventPoints, focusedValue) => {
+const buildCtaEventChoices = (eventPoints, focusedValue, includeOthers = true) => {
   const focused = normalizeName(focusedValue || "");
   const entries = Object.entries(eventPoints || {})
     .map(([name, points]) => ({ name: name.trim(), points }))
@@ -302,8 +302,9 @@ const buildCtaEventChoices = (eventPoints, focusedValue) => {
       value: entry.name
     }));
 
-  const includeOthers = !focused || normalizeName("OTHERS").includes(focused);
-  if (includeOthers && choices.length < 25) {
+  const shouldIncludeOthers =
+    includeOthers && (!focused || normalizeName("OTHERS").includes(focused));
+  if (shouldIncludeOthers && choices.length < 25) {
     choices.push({ name: "OTHERS", value: "OTHERS" });
   }
 
@@ -408,6 +409,13 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.commandName === "cta") {
       const focusedValue = interaction.options.getFocused() || "";
       const choices = buildCtaEventChoices(store.eventPoints, focusedValue);
+      await interaction.respond(choices);
+      return;
+    }
+
+    if (interaction.commandName === "delete_event") {
+      const focusedValue = interaction.options.getFocused() || "";
+      const choices = buildCtaEventChoices(store.eventPoints, focusedValue, false);
       await interaction.respond(choices);
       return;
     }
@@ -622,6 +630,49 @@ client.on("interactionCreate", async (interaction) => {
 
       await interaction.reply({
         content: `${normalizedEvent} event has been assigned ${points} points!`,
+        ephemeral: true
+      });
+      return;
+    }
+
+    if (interaction.commandName === "delete_event") {
+      if (!ensureSenate(interaction)) {
+        await interaction.reply({
+          content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const passwordInput = interaction.options.getString("password", true);
+      const approvalPassword = "#hysteriaPointsApproved@100";
+      if (passwordInput !== approvalPassword) {
+        await interaction.reply({
+          content: "Invalid password.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const eventInput = interaction.options.getString("event", true);
+      const normalizedEvent = normalizeEventName(eventInput);
+      if (!store.eventPoints[normalizedEvent]) {
+        await interaction.reply({
+          content: `Event "${normalizedEvent}" does not exist.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      updateStore((next) => {
+        delete next.eventPoints[normalizedEvent];
+        return next;
+      });
+
+      logActivity(interaction, "delete_event", `Event=${normalizedEvent}`);
+
+      await interaction.reply({
+        content: `${normalizedEvent} event has been deleted.`,
         ephemeral: true
       });
       return;
