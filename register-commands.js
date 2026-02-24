@@ -2,24 +2,7 @@ const { REST, Routes, SlashCommandBuilder } = require("discord.js");
 const { config } = require("./config");
 const { getStore } = require("./store");
 
-const createEventChoices = () => {
-  const store = getStore();
-  const eventPoints = store.eventPoints || {};
-  const eventNames = Object.keys(eventPoints)
-    .map((name) => name.trim())
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b));
-  const limited = eventNames.slice(0, 24);
-  const choices = limited.map((name) => ({
-    name: `${name} = ${eventPoints[name]} pts`,
-    value: name
-  }));
-  choices.push({ name: "OTHERS", value: "OTHERS" });
-  return choices;
-};
-
 const createCommands = () => {
-  const eventChoices = createEventChoices();
   return [
     new SlashCommandBuilder()
       .setName("cta")
@@ -28,7 +11,7 @@ const createCommands = () => {
         option
           .setName("event")
           .setDescription("Event type (e.g. CW1)")
-          .addChoices(...eventChoices)
+          .setAutocomplete(true)
           .setRequired(true)
       )
       .addStringOption((option) =>

@@ -283,6 +283,33 @@ const buildRegisteredUserChoices = (attendance, focusedValue) => {
     }));
 };
 
+const buildCtaEventChoices = (eventPoints, focusedValue) => {
+  const focused = normalizeName(focusedValue || "");
+  const entries = Object.entries(eventPoints || {})
+    .map(([name, points]) => ({ name: name.trim(), points }))
+    .filter((entry) => entry.name);
+
+  const filtered = entries.filter((entry) => {
+    if (!focused) return true;
+    return normalizeName(entry.name).includes(focused);
+  });
+
+  const choices = filtered
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, 24)
+    .map((entry) => ({
+      name: `${entry.name} = ${entry.points} pts`,
+      value: entry.name
+    }));
+
+  const includeOthers = !focused || normalizeName("OTHERS").includes(focused);
+  if (includeOthers && choices.length < 25) {
+    choices.push({ name: "OTHERS", value: "OTHERS" });
+  }
+
+  return choices;
+};
+
 const findUsersByIgn = (attendance, ignInput) => {
   const normalizedIgn = normalizeIgn(ignInput);
   if (!normalizedIgn) return [];
@@ -375,6 +402,13 @@ client.on("interactionCreate", async (interaction) => {
         .map((value) => ({ name: value, value }));
 
       await interaction.respond(timestamps);
+      return;
+    }
+
+    if (interaction.commandName === "cta") {
+      const focusedValue = interaction.options.getFocused() || "";
+      const choices = buildCtaEventChoices(store.eventPoints, focusedValue);
+      await interaction.respond(choices);
       return;
     }
 
