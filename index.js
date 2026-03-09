@@ -381,6 +381,7 @@ client.once("ready", () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  const handleInteraction = async () => {
   if (interaction.isAutocomplete()) {
     const store = getStore();
 
@@ -480,97 +481,107 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      const eventInput = interaction.options.getString("event", true);
-      const descriptionInput = interaction.options.getString("description");
-      const pointsInput = interaction.options.getInteger("points");
-      let normalizedEvent = normalizeEventName(eventInput);
-      let points = store.eventPoints[normalizedEvent];
+      await interaction.deferReply();
 
-      if (normalizedEvent === "OTHERS") {
-        if (!descriptionInput || !pointsInput || pointsInput <= 0) {
-          await interaction.reply({
-            content: "For OTHERS, provide a description and positive points value.",
-            ephemeral: true
+      try {
+        const eventInput = interaction.options.getString("event", true);
+        const descriptionInput = interaction.options.getString("description");
+        const pointsInput = interaction.options.getInteger("points");
+        let normalizedEvent = normalizeEventName(eventInput);
+        let points = store.eventPoints[normalizedEvent];
+
+        if (normalizedEvent === "OTHERS") {
+          if (!descriptionInput || !pointsInput || pointsInput <= 0) {
+            await interaction.editReply({
+              content: "For OTHERS, provide a description and positive points value."
+            });
+            return;
+          }
+
+          normalizedEvent = normalizeEventName(descriptionInput);
+          points = pointsInput;
+        }
+
+        if (!points) {
+          await interaction.editReply({
+            content: `Unknown event "${normalizedEvent}". Use /set_event to add it.`
           });
           return;
         }
 
-        normalizedEvent = normalizeEventName(descriptionInput);
-        points = pointsInput;
-      }
+        const durationInput = interaction.options.getInteger("duration");
+        const duration = durationInput && durationInput > 0 ? durationInput : config.defaultCtaMinutes;
+        const channelId = interaction.channelId;
+        const existing = store.activeCtas[channelId];
 
-      if (!points) {
-        await interaction.reply({
-          content: `Unknown event "${normalizedEvent}". Use /set_event to add it.`,
+        if (existing && !isExpired(existing.expiresAt)) {
+          await interaction.editReply({
+            content: "A CTA is already running in this channel."
+          });
+          return;
+        }
+
+        const code = generateCode(config.codeLength);
+        const expiresAt = Date.now() + duration * 60 * 1000;
+
+        const buttonRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`cta:enter:${channelId}`)
+            .setLabel("Enter Code")
+            .setStyle(ButtonStyle.Primary)
+        );
+
+        const createdDate = formatDate(new Date());
+        const countdown = `<t:${Math.floor(expiresAt / 1000)}:R>`;
+        await interaction.editReply({
+          content:
+            "NEW EVENT ACTIVE\n" +
+            `EVENT TYPE: ${normalizedEvent}\n` +
+            `DATE: ${createdDate}\n` +
+            `POINTS: ${points}\n` +
+            `DURATION: ${duration} minutes\n` +
+            `COUNTDOWN: ${countdown}`,
+          components: [buttonRow]
+        });
+
+        const message = await interaction.fetchReply();
+
+        await interaction.followUp({
+          content: `CTA Code: ${code}`,
           ephemeral: true
         });
-        return;
-      }
 
-      const durationInput = interaction.options.getInteger("duration");
-      const duration = durationInput && durationInput > 0 ? durationInput : config.defaultCtaMinutes;
-      const channelId = interaction.channelId;
-      const existing = store.activeCtas[channelId];
-
-      if (existing && !isExpired(existing.expiresAt)) {
-        await interaction.reply({
-          content: "A CTA is already running in this channel.",
-          ephemeral: true
+        updateStore((next) => {
+          next.activeCtas[channelId] = {
+            code,
+            eventType: normalizedEvent,
+            points,
+            expiresAt,
+            createdBy: interaction.user.id,
+            createdAt: Date.now(),
+            attendees: [],
+            messageId: message.id,
+            guildId: interaction.guildId
+          };
+          return next;
         });
-        return;
+
+        logActivity(
+          interaction,
+          "cta_created",
+          `Event=${normalizedEvent}, Points=${points}, Duration=${duration}m, Channel=${channelId}`
+        );
+
+        scheduleCtaClose(channelId, expiresAt);
+      } catch (error) {
+        console.error("CTA command error:", error);
+        const errorMessage = "Something went wrong while creating the CTA. Please try again.";
+        if (interaction.deferred) {
+          await interaction.editReply({ content: errorMessage }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMessage, ephemeral: true }).catch(() => {});
+        }
       }
-
-      const code = generateCode(config.codeLength);
-      const expiresAt = Date.now() + duration * 60 * 1000;
-
-      const buttonRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`cta:enter:${channelId}`)
-          .setLabel("Enter Code")
-          .setStyle(ButtonStyle.Primary)
-      );
-
-      const createdDate = formatDate(new Date());
-      const countdown = `<t:${Math.floor(expiresAt / 1000)}:R>`;
-      const message = await interaction.reply({
-        content:
-          "NEW EVENT ACTIVE\n" +
-          `EVENT TYPE: ${normalizedEvent}\n` +
-          `DATE: ${createdDate}\n` +
-          `POINTS: ${points}\n` +
-          `DURATION: ${duration} minutes\n` +
-          `COUNTDOWN: ${countdown}`,
-        components: [buttonRow],
-        fetchReply: true
-      });
-
-      await interaction.followUp({
-        content: `CTA Code: ${code}`,
-        ephemeral: true
-      });
-
-      updateStore((next) => {
-        next.activeCtas[channelId] = {
-          code,
-          eventType: normalizedEvent,
-          points,
-          expiresAt,
-          createdBy: interaction.user.id,
-          createdAt: Date.now(),
-          attendees: [],
-          messageId: message.id,
-          guildId: interaction.guildId
-        };
-        return next;
-      });
-
-      logActivity(
-        interaction,
-        "cta_created",
-        `Event=${normalizedEvent}, Points=${points}, Duration=${duration}m, Channel=${channelId}`
-      );
-
-      scheduleCtaClose(channelId, expiresAt);
       return;
     }
 
@@ -1582,6 +1593,27 @@ client.on("interactionCreate", async (interaction) => {
       "cta_join",
       `Event=${cta.eventType}, Channel=${channelId}, Points=${cta.points}`
     );
+  }
+};
+
+  try {
+    await handleInteraction();
+  } catch (error) {
+    console.error("Interaction error:", error);
+    try {
+      if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+        await interaction.reply({
+          content: "Something went wrong. Please try again.",
+          ephemeral: true
+        });
+      } else if (interaction.deferred) {
+        await interaction.editReply({
+          content: "Something went wrong. Please try again."
+        });
+      }
+    } catch (replyError) {
+      console.error("Failed to send error reply:", replyError);
+    }
   }
 });
 
