@@ -460,9 +460,24 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const dateForFilter = normalizeDateForComparison(dateInput);
-      const timestamps = (store.ctaHistory || [])
+      const fromHistory = (store.ctaHistory || [])
         .filter((entry) => normalizeEventName(entry.eventType) === normalizedEvent)
-        .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateForFilter)
+        .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateForFilter);
+      const fromActive = Object.entries(store.activeCtas || {})
+        .filter(([channelId, cta]) => {
+          if (!isExpired(cta.expiresAt)) return false;
+          if (normalizeEventName(cta.eventType) !== normalizedEvent) return false;
+          if (formatManilaDate(new Date(cta.createdAt)) !== dateForFilter) return false;
+          const alreadyInHistory = fromHistory.some(
+            (h) => h.channelId === channelId && h.createdAt === cta.createdAt
+          );
+          return !alreadyInHistory;
+        })
+        .map(([, cta]) => ({ ...cta, attendees: cta.attendees || [] }));
+      const matches = [...fromActive, ...fromHistory].sort(
+        (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
+      );
+      const timestamps = matches
         .map((entry) => formatManilaTimestamp(new Date(entry.createdAt)))
         .sort()
         .slice(0, 25)
@@ -985,9 +1000,38 @@ client.on("interactionCreate", async (interaction) => {
       const normalizedEvent = normalizeEventName(eventInput);
       const dateForFilter = normalizeDateForComparison(dateInput);
 
-      const matches = (store.ctaHistory || [])
+      const fromHistory = (store.ctaHistory || [])
         .filter((entry) => normalizeEventName(entry.eventType) === normalizedEvent)
         .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateForFilter);
+      const fromActive = Object.entries(store.activeCtas || {})
+        .filter(([channelId, cta]) => {
+          if (!isExpired(cta.expiresAt)) return false;
+          if (normalizeEventName(cta.eventType) !== normalizedEvent) return false;
+          if (formatManilaDate(new Date(cta.createdAt)) !== dateForFilter) return false;
+          const alreadyInHistory = fromHistory.some(
+            (h) => h.channelId === channelId && h.createdAt === cta.createdAt
+          );
+          return !alreadyInHistory;
+        })
+        .map(([, cta]) => ({
+          eventType: cta.eventType,
+          createdAt: cta.createdAt,
+          attendees: (cta.attendees || []).map((entry) => {
+            const userId = typeof entry === "string" ? entry : entry.userId;
+            const record = store.attendance[userId];
+            const profile = record?.profile || {};
+            return {
+              userId,
+              ign: profile.ign || profile.name || profile.tag || userId,
+              nickname: profile.nickname || profile.name || profile.tag || "",
+              points: cta.points,
+              joinedAt: typeof entry === "string" ? "N/A" : (entry.joinedAt || "N/A")
+            };
+          })
+        }));
+      const matches = [...fromActive, ...fromHistory].sort(
+        (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
+      );
 
       if (!matches.length) {
         await interaction.reply({
