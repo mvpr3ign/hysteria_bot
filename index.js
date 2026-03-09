@@ -79,6 +79,17 @@ const formatManilaTimestamp = (date) => {
 
 const normalizeDateInput = (value) => (value || "").trim();
 
+/** Normalize date to MM-DD-YY for comparison with formatManilaDate output. Accepts MM-DD-YY or MM-DD-YYYY. */
+const normalizeDateForComparison = (dateStr) => {
+  const s = normalizeDateInput(dateStr);
+  if (!s) return s;
+  const match = s.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/);
+  if (!match) return s;
+  const [, month, day, year] = match;
+  const twoDigitYear = year.length === 4 ? year.slice(-2) : year;
+  return `${month.padStart(2, "0")}-${day.padStart(2, "0")}-${twoDigitYear}`;
+};
+
 const normalizeIgn = (value) => {
   if (!value) return "";
   return value.trim().toUpperCase();
@@ -128,10 +139,53 @@ const handleCtaExpiration = async (channelId) => {
 };
 
 const closeCta = async (channelId, cta) => {
+  let channel = null;
   try {
-    const channel = await client.channels.fetch(channelId);
-    if (!channel) return;
+    channel = await client.channels.fetch(channelId);
+  } catch (fetchError) {
+    const code = fetchError?.code ?? fetchError?.status;
+    const isMissingAccess = code === 50001 || code === 403;
+    console.error(
+      `Failed to fetch channel ${channelId} (${isMissingAccess ? "Missing Access - cleaning up" : fetchError?.message ?? fetchError}):`,
+      fetchError?.message ?? fetchError
+    );
+    updateStore((store) => {
+      delete store.activeCtas[channelId];
+      const attendees = (cta.attendees || []).map((entry) => {
+        const userId = typeof entry === "string" ? entry : entry.userId;
+        const joinedAt = typeof entry === "string" ? null : entry.joinedAt;
+        const record = store.attendance[userId];
+        const profile = record?.profile || {};
+        return {
+          userId,
+          ign: profile.ign || profile.name || profile.tag || userId,
+          nickname: profile.nickname || profile.name || profile.tag || "",
+          points: cta.points,
+          joinedAt: joinedAt || "N/A"
+        };
+      });
+      store.ctaHistory.push({
+        eventType: cta.eventType,
+        points: cta.points,
+        createdAt: cta.createdAt,
+        closedAt: Date.now(),
+        channelId,
+        guildId: cta.guildId,
+        attendees
+      });
+      return store;
+    });
+    appendAuditLog(
+      "cta_closed",
+      null,
+      `Event=${cta.eventType}, Channel=${channelId} (cleaned up: channel inaccessible)`
+    );
+    return;
+  }
 
+  if (!channel) return;
+
+  try {
     if (cta.messageId) {
       const message = await channel.messages.fetch(cta.messageId);
       if (message) {
@@ -359,9 +413,13 @@ const sweepExpiredCtas = async () => {
     isExpired(cta.expiresAt)
   );
 
-  await Promise.all(
-    expired.map(([channelId, cta]) => closeCta(channelId, cta))
-  );
+  for (const [channelId, cta] of expired) {
+    try {
+      await closeCta(channelId, cta);
+    } catch (error) {
+      console.error(`sweepExpiredCtas: failed to close CTA in channel ${channelId}:`, error);
+    }
+  }
 };
 
 client.once("ready", () => {
@@ -386,6 +444,12 @@ client.on("interactionCreate", async (interaction) => {
     const store = getStore();
 
     if (interaction.commandName === "cta_attendance") {
+      const focused = interaction.options.getFocused(true);
+      if (focused.name === "event") {
+        const choices = buildCtaEventChoices(store.eventPoints, focused.value || "");
+        await interaction.respond(choices);
+        return;
+      }
       const eventInput = interaction.options.getString("event");
       const dateInput = normalizeDateInput(interaction.options.getString("date"));
       const normalizedEvent = normalizeEventName(eventInput);
@@ -395,9 +459,10 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
+      const dateForFilter = normalizeDateForComparison(dateInput);
       const timestamps = (store.ctaHistory || [])
         .filter((entry) => normalizeEventName(entry.eventType) === normalizedEvent)
-        .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateInput)
+        .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateForFilter)
         .map((entry) => formatManilaTimestamp(new Date(entry.createdAt)))
         .sort()
         .slice(0, 25)
@@ -918,10 +983,11 @@ client.on("interactionCreate", async (interaction) => {
       const dateInput = normalizeDateInput(interaction.options.getString("date", true));
       const timestampInput = normalizeDateInput(interaction.options.getString("timestamp"));
       const normalizedEvent = normalizeEventName(eventInput);
+      const dateForFilter = normalizeDateForComparison(dateInput);
 
       const matches = (store.ctaHistory || [])
         .filter((entry) => normalizeEventName(entry.eventType) === normalizedEvent)
-        .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateInput);
+        .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateForFilter);
 
       if (!matches.length) {
         await interaction.reply({

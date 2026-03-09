@@ -140,6 +140,7 @@ const createCommands = () => {
         option
           .setName("event")
           .setDescription("Event type (e.g. CW1)")
+          .setAutocomplete(true)
           .setRequired(true)
       )
       .addStringOption((option) =>
