@@ -153,6 +153,28 @@ const createCommands = () => {
       .setName("end")
       .setDescription("End the active CTA in this channel (Senate only)"),
     new SlashCommandBuilder()
+      .setName("record_cta")
+      .setDescription("Manually record a past CTA (Senate only, for recovery)")
+      .addStringOption((option) =>
+        option
+          .setName("date")
+          .setDescription("Date MM-DD-YY (Philippine time)")
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("event")
+          .setDescription("Event type")
+          .setAutocomplete(true)
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("time")
+          .setDescription("Time HH:MM 24h (Manila), e.g. 17:35 for 5:35 PM")
+          .setRequired(false)
+      ),
+    new SlashCommandBuilder()
       .setName("addpoints")
       .setDescription("Add points to a registered member (Senate only)")
       .addStringOption((option) =>

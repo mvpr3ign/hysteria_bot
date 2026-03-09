@@ -529,6 +529,13 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
+    if (interaction.commandName === "record_cta") {
+      const focusedValue = interaction.options.getFocused() || "";
+      const choices = buildCtaEventChoices(store.eventPoints, focusedValue, false);
+      await interaction.respond(choices);
+      return;
+    }
+
     if (interaction.commandName === "addpoints") {
       const focused = normalizeName(interaction.options.getFocused() || "");
       const entries = Object.values(store.attendance || {}).map((entry) => {
@@ -660,6 +667,38 @@ client.on("interactionCreate", async (interaction) => {
         });
 
         updateStore((next) => {
+          const existingExpired = next.activeCtas[channelId];
+          if (existingExpired && isExpired(existingExpired.expiresAt)) {
+            const attendees = (existingExpired.attendees || []).map((entry) => {
+              const userId = typeof entry === "string" ? entry : entry.userId;
+              const joinedAt = typeof entry === "string" ? null : entry.joinedAt;
+              const record = next.attendance[userId];
+              const profile = record?.profile || {};
+              return {
+                userId,
+                ign: profile.ign || profile.name || profile.tag || userId,
+                nickname: profile.nickname || profile.name || profile.tag || "",
+                points: existingExpired.points,
+                joinedAt: joinedAt || "N/A"
+              };
+            });
+            next.ctaHistory.push({
+              eventType: existingExpired.eventType,
+              points: existingExpired.points,
+              createdAt: existingExpired.createdAt,
+              closedAt: Date.now(),
+              channelId,
+              guildId: existingExpired.guildId,
+              attendees
+            });
+            next.auditLog.push({
+              action: "cta_closed",
+              performedBy: "system",
+              performedByName: "system",
+              timestamp: formatManilaTimestamp(new Date()),
+              details: `Event=${existingExpired.eventType}, Channel=${channelId} (salvaged before new CTA)`
+            });
+          }
           next.activeCtas[channelId] = {
             code,
             eventType: normalizedEvent,
@@ -1122,6 +1161,114 @@ client.on("interactionCreate", async (interaction) => {
         interaction,
         "cta_attendance_view",
         `Event=${selected.eventType}, Date=${dateInput}`
+      );
+      return;
+    }
+
+    if (interaction.commandName === "record_cta") {
+      if (!ensureSenate(interaction)) {
+        await interaction.reply({
+          content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const dateInput = normalizeDateInput(interaction.options.getString("date", true));
+      const eventInput = interaction.options.getString("event", true);
+      const timeInput = normalizeDateInput(interaction.options.getString("time"));
+      const dateForFilter = normalizeDateForComparison(dateInput);
+
+      if (!dateForFilter) {
+        await interaction.reply({
+          content: "Invalid date format. Use MM-DD-YY (e.g. 03-09-26).",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const normalizedEvent = normalizeEventName(eventInput);
+      const points = store.eventPoints[normalizedEvent];
+
+      if (!points) {
+        await interaction.reply({
+          content: `Unknown event "${normalizedEvent}". Use /set_event to add it first.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      let hour = 12;
+      let minute = 0;
+      if (timeInput) {
+        const timeMatch = timeInput.match(/^(\d{1,2}):(\d{2})$/);
+        if (!timeMatch) {
+          await interaction.reply({
+            content: "Invalid time format. Use HH:MM 24h (e.g. 17:35 for 5:35 PM).",
+            ephemeral: true
+          });
+          return;
+        }
+        hour = parseInt(timeMatch[1], 10);
+        minute = parseInt(timeMatch[2], 10);
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+          await interaction.reply({
+            content: "Time must be 00:00–23:59.",
+            ephemeral: true
+          });
+          return;
+        }
+      }
+
+      const dateMatch = dateForFilter.match(/^(\d{2})-(\d{2})-(\d{2})$/);
+      if (!dateMatch) {
+        await interaction.reply({
+          content: "Invalid date format. Use MM-DD-YY.",
+          ephemeral: true
+        });
+        return;
+      }
+      const [, month, day, yearPart] = dateMatch;
+      const year = `20${yearPart}`;
+      const isoManila = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00+08:00`;
+      const createdAt = new Date(isoManila).getTime();
+
+      if (Number.isNaN(createdAt)) {
+        await interaction.reply({
+          content: "Could not parse date/time. Use MM-DD-YY and optional HH:MM.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      updateStore((next) => {
+        next.ctaHistory.push({
+          eventType: normalizedEvent,
+          points,
+          createdAt,
+          closedAt: createdAt,
+          channelId: null,
+          guildId: interaction.guildId,
+          attendees: []
+        });
+        next.auditLog.push({
+          action: "record_cta",
+          performedBy: interaction.user.id,
+          performedByName: interaction.user.tag || "unknown",
+          timestamp: formatManilaTimestamp(new Date()),
+          details: `Event=${normalizedEvent}, Date=${dateForFilter}, Time=${timeInput || "12:00"} (manual recovery)`
+        });
+        return next;
+      });
+
+      await interaction.reply({
+        content: `Recorded CTA: **${normalizedEvent}** (${points} pts) for ${dateForFilter}${timeInput ? ` at ${timeInput}` : ""}.`,
+        ephemeral: true
+      });
+      logActivity(
+        interaction,
+        "record_cta",
+        `Event=${normalizedEvent}, Date=${dateForFilter}`
       );
       return;
     }
