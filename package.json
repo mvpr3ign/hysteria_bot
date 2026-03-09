@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "register": "node register-commands.js"
+    "register": "node register-commands.js",
+    "test": "node --test tests/store.test.js tests/dateUtils.test.js"
   },
   "dependencies": {
     "discord.js": "^14.16.3",

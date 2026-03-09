@@ -12,6 +12,11 @@ const {
 } = require("discord.js");
 const { config } = require("./config");
 const { getStore, updateStore } = require("./store");
+const {
+  formatManilaDate,
+  normalizeDateInput,
+  normalizeDateForComparison
+} = require("./lib/dateUtils");
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
@@ -44,19 +49,6 @@ const formatTimestamp = (date) => {
   }).format(date);
 };
 
-const formatManilaDate = (date) => {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Manila",
-    month: "2-digit",
-    day: "2-digit",
-    year: "2-digit"
-  }).formatToParts(date);
-  const month = parts.find((part) => part.type === "month")?.value || "01";
-  const day = parts.find((part) => part.type === "day")?.value || "01";
-  const year = parts.find((part) => part.type === "year")?.value || "00";
-  return `${month}-${day}-${year}`;
-};
-
 const formatManilaTimestamp = (date) => {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Manila",
@@ -75,24 +67,6 @@ const formatManilaTimestamp = (date) => {
   const minute = parts.find((part) => part.type === "minute")?.value || "00";
   const second = parts.find((part) => part.type === "second")?.value || "00";
   return `${month}-${day}-${year} ${hour}:${minute}:${second}`;
-};
-
-const normalizeDateInput = (value) => (value || "").trim();
-
-/** Normalize date to MM-DD-YY for comparison with formatManilaDate output. Accepts MM-DD-YY or MM-DD-YYYY. */
-const normalizeDateForComparison = (dateStr) => {
-  const s = normalizeDateInput(dateStr);
-  if (!s) return s;
-  const match = s.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/);
-  if (!match) return s;
-  const [, month, day, year] = match;
-  const twoDigitYear = year.length === 4 ? year.slice(-2) : year;
-  return `${month.padStart(2, "0")}-${day.padStart(2, "0")}-${twoDigitYear}`;
-};
-
-const normalizeIgn = (value) => {
-  if (!value) return "";
-  return value.trim().toUpperCase();
 };
 
 const normalizeName = (value) => {
