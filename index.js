@@ -146,9 +146,12 @@ const closeCta = async (channelId, cta) => {
     const code = fetchError?.code ?? fetchError?.status;
     const isMissingAccess = code === 50001 || code === 403;
     console.error(
-      `Failed to fetch channel ${channelId} (${isMissingAccess ? "Missing Access - cleaning up" : fetchError?.message ?? fetchError}):`,
+      `Failed to fetch channel ${channelId} (${isMissingAccess ? "Missing Access - will retry" : fetchError?.message ?? fetchError}):`,
       fetchError?.message ?? fetchError
     );
+    if (isMissingAccess) {
+      return;
+    }
     updateStore((store) => {
       delete store.activeCtas[channelId];
       const attendees = (cta.attendees || []).map((entry) => {
@@ -436,6 +439,10 @@ client.once("ready", () => {
   setInterval(() => {
     sweepExpiredCtas();
   }, 60 * 1000);
+
+  setTimeout(() => {
+    sweepExpiredCtas();
+  }, 5000);
 });
 
 client.on("interactionCreate", async (interaction) => {
@@ -444,46 +451,56 @@ client.on("interactionCreate", async (interaction) => {
     const store = getStore();
 
     if (interaction.commandName === "cta_attendance") {
-      const focused = interaction.options.getFocused(true);
-      if (focused.name === "event") {
-        const choices = buildCtaEventChoices(store.eventPoints, focused.value || "");
-        await interaction.respond(choices);
-        return;
-      }
-      const eventInput = interaction.options.getString("event");
       const dateInput = normalizeDateInput(interaction.options.getString("date"));
-      const normalizedEvent = normalizeEventName(eventInput);
-
-      if (!normalizedEvent || !dateInput) {
+      if (!dateInput) {
         await interaction.respond([]);
         return;
       }
-
       const dateForFilter = normalizeDateForComparison(dateInput);
+
       const fromHistory = (store.ctaHistory || [])
-        .filter((entry) => normalizeEventName(entry.eventType) === normalizedEvent)
         .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateForFilter);
       const fromActive = Object.entries(store.activeCtas || {})
         .filter(([channelId, cta]) => {
           if (!isExpired(cta.expiresAt)) return false;
-          if (normalizeEventName(cta.eventType) !== normalizedEvent) return false;
           if (formatManilaDate(new Date(cta.createdAt)) !== dateForFilter) return false;
           const alreadyInHistory = fromHistory.some(
             (h) => h.channelId === channelId && h.createdAt === cta.createdAt
           );
           return !alreadyInHistory;
         })
-        .map(([, cta]) => ({ ...cta, attendees: cta.attendees || [] }));
-      const matches = [...fromActive, ...fromHistory].sort(
+        .map(([channelId, cta]) => ({ ...cta, channelId, attendees: cta.attendees || [] }));
+      const fromHistoryWithChannel = fromHistory.map((entry) => ({
+        ...entry,
+        channelId: entry.channelId ?? "unknown"
+      }));
+      const matches = [...fromActive, ...fromHistoryWithChannel].sort(
         (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
       );
-      const timestamps = matches
-        .map((entry) => formatManilaTimestamp(new Date(entry.createdAt)))
-        .sort()
-        .slice(0, 25)
-        .map((value) => ({ name: value, value }));
 
-      await interaction.respond(timestamps);
+      const focusedValue = (interaction.options.getFocused(true).value || "").toLowerCase();
+      const timestampChoices = matches
+        .map((entry) => {
+          const ts = formatManilaTimestamp(new Date(entry.createdAt));
+          const eventType = entry.eventType || "Unknown";
+          const name = `${ts} - ${eventType}`;
+          const value = `${entry.createdAt}__${entry.channelId ?? "unknown"}`;
+          return { name, value };
+        })
+        .filter(
+          (choice) =>
+            !focusedValue ||
+            choice.name.toLowerCase().includes(focusedValue)
+        )
+        .slice(0, 25);
+
+      if (timestampChoices.length === 0) {
+        await interaction.respond([
+          { name: "No CTAs for this date yet", value: "__list_only__" }
+        ]);
+      } else {
+        await interaction.respond(timestampChoices);
+      }
       return;
     }
 
@@ -994,28 +1011,25 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      const eventInput = interaction.options.getString("event", true);
       const dateInput = normalizeDateInput(interaction.options.getString("date", true));
       const timestampInput = normalizeDateInput(interaction.options.getString("timestamp"));
-      const normalizedEvent = normalizeEventName(eventInput);
       const dateForFilter = normalizeDateForComparison(dateInput);
 
       const fromHistory = (store.ctaHistory || [])
-        .filter((entry) => normalizeEventName(entry.eventType) === normalizedEvent)
         .filter((entry) => formatManilaDate(new Date(entry.createdAt)) === dateForFilter);
       const fromActive = Object.entries(store.activeCtas || {})
         .filter(([channelId, cta]) => {
           if (!isExpired(cta.expiresAt)) return false;
-          if (normalizeEventName(cta.eventType) !== normalizedEvent) return false;
           if (formatManilaDate(new Date(cta.createdAt)) !== dateForFilter) return false;
           const alreadyInHistory = fromHistory.some(
             (h) => h.channelId === channelId && h.createdAt === cta.createdAt
           );
           return !alreadyInHistory;
         })
-        .map(([, cta]) => ({
+        .map(([channelId, cta]) => ({
           eventType: cta.eventType,
           createdAt: cta.createdAt,
+          channelId,
           attendees: (cta.attendees || []).map((entry) => {
             const userId = typeof entry === "string" ? entry : entry.userId;
             const record = store.attendance[userId];
@@ -1035,37 +1049,48 @@ client.on("interactionCreate", async (interaction) => {
 
       if (!matches.length) {
         await interaction.reply({
-          content: `No CTA history found for ${normalizedEvent} on ${dateInput}.`,
+          content: `No CTA history found for ${dateInput}.`,
           ephemeral: true
         });
         return;
       }
 
-      if (!timestampInput) {
-        const timestamps = matches
-          .map((entry) => formatManilaTimestamp(new Date(entry.createdAt)))
-          .sort();
+      if (!timestampInput || timestampInput === "__list_only__") {
+        const lines = matches.map(
+          (entry) =>
+            `${formatManilaTimestamp(new Date(entry.createdAt))} - ${entry.eventType || "Unknown"}`
+        );
         await interaction.reply({
           content:
-            `Available timestamps for ${normalizedEvent} on ${dateInput} (PH time):\n` +
-            timestamps.join("\n"),
+            `CTAs on ${dateInput} (PH time):\n` + lines.join("\n"),
           ephemeral: true
         });
         logActivity(
           interaction,
           "cta_attendance_list",
-          `Event=${normalizedEvent}, Date=${dateInput}`
+          `Date=${dateInput}`
         );
         return;
       }
 
-      const selected = matches.find(
-        (entry) => formatManilaTimestamp(new Date(entry.createdAt)) === timestampInput
-      );
+      const valueParts = timestampInput.split("__");
+      const parsedCreatedAt = valueParts.length >= 1 ? Number(valueParts[0]) : null;
+      const parsedChannelId = valueParts.length >= 2 ? valueParts[1] : null;
+      const selected =
+        parsedCreatedAt != null && parsedChannelId != null
+          ? matches.find(
+              (entry) =>
+                entry.createdAt === parsedCreatedAt &&
+                (entry.channelId === parsedChannelId || String(entry.channelId) === parsedChannelId)
+            )
+          : matches.find(
+              (entry) =>
+                formatManilaTimestamp(new Date(entry.createdAt)) === timestampInput
+            );
 
       if (!selected) {
         await interaction.reply({
-          content: `Timestamp not found. Use /cta_attendance to list available timestamps.`,
+          content: `CTA not found. Use /cta_attendance to list options for ${dateInput}.`,
           ephemeral: true
         });
         return;
@@ -1077,13 +1102,15 @@ client.on("interactionCreate", async (interaction) => {
       );
 
       await interaction.reply({
-        content: lines.length ? lines.join("\n") : "No attendees recorded.",
+        content:
+          (lines.length ? lines.join("\n") : "No attendees recorded.") +
+          `\n_${selected.eventType || "Unknown"} • ${formatManilaTimestamp(new Date(selected.createdAt))}_`,
         ephemeral: true
       });
       logActivity(
         interaction,
         "cta_attendance_view",
-        `Event=${normalizedEvent}, Timestamp=${timestampInput}`
+        `Event=${selected.eventType}, Date=${dateInput}`
       );
       return;
     }

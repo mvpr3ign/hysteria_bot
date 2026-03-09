@@ -135,24 +135,17 @@ const createCommands = () => {
       .setDescription("Show your registered profile"),
     new SlashCommandBuilder()
       .setName("cta_attendance")
-      .setDescription("View CTA attendance by event and date (Senate only)")
-      .addStringOption((option) =>
-        option
-          .setName("event")
-          .setDescription("Event type (e.g. CW1)")
-          .setAutocomplete(true)
-          .setRequired(true)
-      )
+      .setDescription("View CTA attendance by date (Senate only)")
       .addStringOption((option) =>
         option
           .setName("date")
-          .setDescription("MM-DD-YY (Philippine time)")
+          .setDescription("Date MM-DD-YY (Philippine time)")
           .setRequired(true)
       )
       .addStringOption((option) =>
         option
           .setName("timestamp")
-          .setDescription("Select a timestamp from the list")
+          .setDescription("Select a CTA (timestamp - event type)")
           .setAutocomplete(true)
           .setRequired(false)
       ),
