@@ -120,12 +120,9 @@ const closeCta = async (channelId, cta) => {
     const code = fetchError?.code ?? fetchError?.status;
     const isMissingAccess = code === 50001 || code === 403;
     console.error(
-      `Failed to fetch channel ${channelId} (${isMissingAccess ? "Missing Access - will retry" : fetchError?.message ?? fetchError}):`,
+      `Failed to fetch channel ${channelId} (${isMissingAccess ? "Missing Access" : "error"} - cleaning up):`,
       fetchError?.message ?? fetchError
     );
-    if (isMissingAccess) {
-      return;
-    }
     updateStore((store) => {
       delete store.activeCtas[channelId];
       const attendees = (cta.attendees || []).map((entry) => {
@@ -225,7 +222,47 @@ const closeCta = async (channelId, cta) => {
 
     await channel.send("Event registration has closed.");
   } catch (error) {
-    console.error("Failed to close CTA:", error);
+    const code = error?.code ?? error?.status;
+    const isMissingAccess = code === 50001 || code === 403;
+    if (isMissingAccess) {
+      console.error(
+        `Failed to close CTA in channel ${channelId} (Missing Access - cleaning up):`,
+        error?.message ?? error
+      );
+      updateStore((store) => {
+        delete store.activeCtas[channelId];
+        const attendees = (cta.attendees || []).map((entry) => {
+          const userId = typeof entry === "string" ? entry : entry.userId;
+          const joinedAt = typeof entry === "string" ? null : entry.joinedAt;
+          const record = store.attendance[userId];
+          const profile = record?.profile || {};
+          return {
+            userId,
+            ign: profile.ign || profile.name || profile.tag || userId,
+            nickname: profile.nickname || profile.name || profile.tag || "",
+            points: cta.points,
+            joinedAt: joinedAt || "N/A"
+          };
+        });
+        store.ctaHistory.push({
+          eventType: cta.eventType,
+          points: cta.points,
+          createdAt: cta.createdAt,
+          closedAt: Date.now(),
+          channelId,
+          guildId: cta.guildId,
+          attendees
+        });
+        return store;
+      });
+      appendAuditLog(
+        "cta_closed",
+        null,
+        `Event=${cta.eventType}, Channel=${channelId} (cleaned up: message inaccessible)`
+      );
+    } else {
+      console.error("Failed to close CTA:", error);
+    }
   }
 };
 
