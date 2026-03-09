@@ -1305,6 +1305,83 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
+    if (interaction.commandName === "fix_cta_messages") {
+      if (!ensureSenate(interaction)) {
+        await interaction.reply({
+          content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const channelOption = interaction.options.getChannel("channel");
+      const targetChannel = channelOption || interaction.channel;
+      if (!targetChannel?.messages) {
+        await interaction.reply({
+          content: "Cannot fetch messages from this channel.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+
+      try {
+        const messages = await targetChannel.messages.fetch({ limit: 50 });
+        const botUserId = interaction.client.user.id;
+        let fixedCount = 0;
+
+        const disabledRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("cta:closed")
+            .setLabel("Registration Closed")
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(true)
+        );
+
+        for (const [, message] of messages) {
+          if (message.author?.id !== botUserId) continue;
+          if (!message.content?.includes("NEW EVENT ACTIVE")) continue;
+
+          const hasEnterCodeButton = message.components?.some((row) =>
+            row.components?.some(
+              (c) => c.type === 2 && c.label === "Enter Code" && !c.disabled
+            )
+          );
+          if (!hasEnterCodeButton) continue;
+
+          const closedContent = message.content.replace(
+            /COUNTDOWN: .+/,
+            "COUNTDOWN: DONE"
+          );
+          await message.edit({
+            content: closedContent,
+            components: [disabledRow]
+          });
+          fixedCount += 1;
+        }
+
+        await interaction.editReply({
+          content: fixedCount
+            ? `Updated ${fixedCount} CTA message(s) to "Registration Closed" in ${targetChannel.name}.`
+            : `No CTA messages with "Enter Code" found in ${targetChannel.name}.`
+        });
+        if (fixedCount > 0) {
+          logActivity(
+            interaction,
+            "fix_cta_messages",
+            `Channel=${targetChannel.id}, Fixed=${fixedCount}`
+          );
+        }
+      } catch (error) {
+        console.error("fix_cta_messages error:", error);
+        await interaction.editReply({
+          content: `Failed to fix messages: ${error?.message || "Unknown error"}. Check bot permissions (Manage Messages, View Channel, Read Message History).`
+        });
+      }
+      return;
+    }
+
     if (interaction.commandName === "addpoints") {
       if (!ensureSenate(interaction)) {
         await interaction.reply({

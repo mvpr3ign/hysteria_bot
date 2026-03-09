@@ -1,4 +1,4 @@
-const { REST, Routes, SlashCommandBuilder } = require("discord.js");
+const { ChannelType, REST, Routes, SlashCommandBuilder } = require("discord.js");
 const { config } = require("./config");
 const { getStore } = require("./store");
 
@@ -152,6 +152,16 @@ const createCommands = () => {
     new SlashCommandBuilder()
       .setName("end")
       .setDescription("End the active CTA in this channel (Senate only)"),
+    new SlashCommandBuilder()
+      .setName("fix_cta_messages")
+      .setDescription("Update old CTA messages in this channel to Registration Closed (Senate only)")
+      .addChannelOption((option) =>
+        option
+          .setName("channel")
+          .setDescription("Channel to fix (default: current channel)")
+          .addChannelTypes(ChannelType.GuildText)
+          .setRequired(false)
+      ),
     new SlashCommandBuilder()
       .setName("record_cta")
       .setDescription("Manually record a past CTA (Senate only, for recovery)")
