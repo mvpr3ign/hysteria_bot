@@ -74,6 +74,12 @@ const normalizeName = (value) => {
   return value.trim().toUpperCase();
 };
 
+/** Uppercase IGN for search; strips common separators so "HanzeLz" matches stored variants */
+const normalizeIgn = (value) => {
+  if (!value) return "";
+  return String(value).trim().toUpperCase().replace(/[\s\[\]_-]+/g, "");
+};
+
 const generateCode = (length = 4) => {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const alphaNumeric = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -329,7 +335,8 @@ const buildRegisteredUserChoices = (attendance, focusedValue) => {
       const profile = data?.profile || {};
       const nickname = profile.nickname || profile.name || profile.tag || "";
       const ign = profile.ign || "";
-      return { userId, nickname, ign };
+      const tag = profile.tag || "";
+      return { userId, nickname, ign, tag };
     })
     .filter((entry) => entry.nickname && entry.ign);
 
@@ -337,7 +344,8 @@ const buildRegisteredUserChoices = (attendance, focusedValue) => {
     if (!focused) return true;
     return (
       normalizeName(entry.nickname).includes(focused) ||
-      normalizeIgn(entry.ign).includes(focused) ||
+      normalizeName(entry.ign).includes(focused) ||
+      normalizeIgn(entry.ign).includes(focused.replace(/\s+/g, "")) ||
       normalizeName(entry.tag).includes(focused)
     );
   });
@@ -387,6 +395,32 @@ const findUsersByIgn = (attendance, ignInput) => {
     .map(([userId, data]) => ({ userId, data }));
 };
 
+/**
+ * For batch files: exact IGN match first; if none, single substring match (normalized), min 3 chars.
+ * Avoids false positives from very short queries.
+ */
+const findUsersByIgnForBatch = (attendance, ignInput) => {
+  const exact = findUsersByIgn(attendance, ignInput);
+  if (exact.length > 1) return { matches: exact, reason: "ambiguous" };
+  if (exact.length === 1) return { matches: exact, reason: "exact" };
+
+  const norm = normalizeIgn(ignInput);
+  if (norm.length < 3) {
+    return { matches: [], reason: "not_found" };
+  }
+
+  const partial = Object.entries(attendance || {})
+    .filter(([, data]) => {
+      const stored = normalizeIgn(data?.profile?.ign || "");
+      return stored && stored.includes(norm);
+    })
+    .map(([userId, data]) => ({ userId, data }));
+
+  if (partial.length === 1) return { matches: partial, reason: "partial" };
+  if (partial.length > 1) return { matches: partial, reason: "ambiguous" };
+  return { matches: [], reason: "not_found" };
+};
+
 const findUsersByNickname = (attendance, nicknameInput) => {
   const normalizedNickname = normalizeName(nicknameInput);
   if (!normalizedNickname) return [];
@@ -399,6 +433,7 @@ const findUsersByNickname = (attendance, nicknameInput) => {
     .map(([userId, data]) => ({ userId, data }));
 };
 
+/** Partial match on nickname, IGN, or tag (for /addpoints typing + autocomplete) */
 const findUsersBySearch = (attendance, searchInput) => {
   const normalizedSearch = normalizeName(searchInput);
   if (!normalizedSearch) return [];
@@ -409,12 +444,27 @@ const findUsersBySearch = (attendance, searchInput) => {
       const ign = profile.ign || "";
       const tag = profile.tag || "";
       return (
-        normalizeName(nickname) === normalizedSearch ||
-        normalizeIgn(ign) === normalizedSearch ||
-        normalizeName(tag) === normalizedSearch
+        normalizeName(nickname).includes(normalizedSearch) ||
+        normalizeName(ign).includes(normalizedSearch) ||
+        normalizeIgn(ign).includes(normalizedSearch.replace(/\s+/g, "")) ||
+        normalizeName(tag).includes(normalizedSearch)
       );
     })
     .map(([userId, data]) => ({ userId, data }));
+};
+
+const resolveAddpointsTarget = (attendance, rawInput) => {
+  const trimmed = (rawInput || "").trim();
+  if (!trimmed) return [];
+
+  if (/^\d{17,20}$/.test(trimmed) && attendance[trimmed]) {
+    return [{ userId: trimmed, data: attendance[trimmed] }];
+  }
+
+  const byExactNick = findUsersByNickname(attendance, trimmed);
+  if (byExactNick.length) return byExactNick;
+
+  return findUsersBySearch(attendance, trimmed);
 };
 
 const getAttendeeIds = (attendees) => {
@@ -537,37 +587,50 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.commandName === "addpoints") {
-      const focused = normalizeName(interaction.options.getFocused() || "");
-      const entries = Object.values(store.attendance || {}).map((entry) => {
+      const focusedOption = interaction.options.getFocused(true);
+      const focusedRaw =
+        typeof focusedOption?.value === "string" ? focusedOption.value : "";
+      const focused = normalizeName(focusedRaw);
+
+      const entries = Object.entries(store.attendance || {}).map(([userId, entry]) => {
         const profile = entry?.profile || {};
         return {
+          userId,
           nickname: profile.nickname || profile.name || profile.tag || "",
           ign: profile.ign || "",
           tag: profile.tag || ""
         };
       });
 
-      const unique = new Map();
-      entries.forEach((entry) => {
-        if (!entry.nickname) return;
-        if (!unique.has(entry.nickname)) unique.set(entry.nickname, entry);
-      });
-
-      const filtered = Array.from(unique.values())
+      const filtered = entries
+        .filter((entry) => entry.nickname || entry.ign)
         .filter((entry) => {
           if (!focused) return true;
           return (
             normalizeName(entry.nickname).includes(focused) ||
-            normalizeIgn(entry.ign).includes(focused) ||
+            normalizeName(entry.ign).includes(focused) ||
+            normalizeIgn(entry.ign).includes(focused.replace(/\s+/g, "")) ||
             normalizeName(entry.tag).includes(focused)
           );
         })
-        .sort((a, b) => a.nickname.localeCompare(b.nickname))
+        .sort((a, b) => {
+          const aNick = normalizeName(a.nickname);
+          const bNick = normalizeName(b.nickname);
+          const aStarts = focused && aNick.startsWith(focused);
+          const bStarts = focused && bNick.startsWith(focused);
+          if (aStarts !== bStarts) return aStarts ? -1 : 1;
+          return (a.nickname || a.ign).localeCompare(b.nickname || b.ign);
+        })
         .slice(0, 25)
-        .map((entry) => ({
-          name: `${entry.nickname}${entry.ign ? ` | ${entry.ign}` : ""}${entry.tag ? ` | ${entry.tag}` : ""}`,
-          value: entry.nickname
-        }));
+        .map((entry) => {
+          const displayNick = entry.nickname || entry.ign || entry.userId;
+          const name =
+            `${displayNick}${entry.ign && entry.nickname ? ` | ${entry.ign}` : ""}${entry.tag ? ` | ${entry.tag}` : ""}`.trim();
+          return {
+            name: name.length > 100 ? name.slice(0, 97) + "..." : name,
+            value: entry.userId
+          };
+        });
 
       await interaction.respond(filtered);
       return;
@@ -1412,10 +1475,7 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      const matches = findUsersByNickname(store.attendance, nicknameInput);
-      const searchMatches = matches.length
-        ? matches
-        : findUsersBySearch(store.attendance, nicknameInput);
+      const searchMatches = resolveAddpointsTarget(store.attendance, nicknameInput);
       if (!searchMatches.length) {
         await interaction.reply({
           content: `No registered user found with nickname "${nicknameInput}".`,
@@ -1546,14 +1606,13 @@ client.on("interactionCreate", async (interaction) => {
           return;
         }
 
-        const matches = findUsersByIgn(store.attendance, ignPart);
-        if (!matches.length) {
-          errors.push(`IGN not found: ${ignPart}`);
+        const { matches, reason } = findUsersByIgnForBatch(store.attendance, ignPart);
+        if (reason === "ambiguous" || matches.length > 1) {
+          errors.push(`IGN ambiguous: ${ignPart}`);
           return;
         }
-
-        if (matches.length > 1) {
-          errors.push(`IGN ambiguous: ${ignPart}`);
+        if (!matches.length) {
+          errors.push(`IGN not found: ${ignPart}`);
           return;
         }
 
